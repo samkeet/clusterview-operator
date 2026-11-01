@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- observe_v1alpha1_clusterview.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
