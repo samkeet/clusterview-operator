@@ -29,8 +29,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	observev1alpha1 "github.com/samkeet/clusterview-operator/api/v1alpha1"
 	"github.com/samkeet/clusterview-operator/internal/clusterstate"
@@ -51,6 +53,8 @@ type ClusterViewReconciler struct {
 
 // +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews,verbs=get;list;watch
 // +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=list;watch
 
 // Reconcile is level-triggered: each run rebuilds the summary from the whole cache,
 // so a deferred or coalesced run never loses an event.
@@ -138,6 +142,25 @@ func (r *ClusterViewReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Generation-only, so our own status patches don't retrigger a reconcile.
 		For(&observev1alpha1.ClusterView{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.mapAll), builder.WithPredicates(nodePredicate)).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.mapAll), builder.WithPredicates(podPredicate)).
 		Named("clusterview").
 		Complete(r)
+}
+
+// mapAll fans a Node or Pod event out to every ClusterView. Each view summarises
+// the whole cluster, so any of them may be affected. The per-CR namespace filter is
+// applied in Reconcile, where a filtered-out pod simply produces no write.
+func (r *ClusterViewReconciler) mapAll(ctx context.Context, _ client.Object) []reconcile.Request {
+	var views observev1alpha1.ClusterViewList
+	if err := r.List(ctx, &views); err != nil {
+		// A map func can't return an error. The 5m backstop recovers the missed event.
+		logf.FromContext(ctx).Error(err, "Failed to list ClusterViews for a node or pod event")
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0, len(views.Items))
+	for i := range views.Items {
+		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&views.Items[i])})
+	}
+	return reqs
 }

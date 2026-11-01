@@ -5,6 +5,14 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - nodes
+  - pods
+  verbs:
+  - list
+  - watch
+- apiGroups:
   - observe.samkeet.org
   resources:
   - clusterviews
