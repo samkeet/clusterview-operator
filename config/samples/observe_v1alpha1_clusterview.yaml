@@ -4,6 +4,10 @@ metadata:
   labels:
     app.kubernetes.io/name: clusterview-operator
     app.kubernetes.io/managed-by: kustomize
-  name: clusterview-sample
+  # The API server's --clusterview-name flag defaults to this name.
+  name: cluster
 spec:
-  # TODO(user): Add fields here
+  # Empty = count pods in every namespace.
+  namespaces: []
+  # Minimum time between status writes (not a polling interval).
+  refreshInterval: 10s
