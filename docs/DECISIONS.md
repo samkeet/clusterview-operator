@@ -61,3 +61,55 @@ One block per decision: the options we considered, then what we picked and why. 
 ## Parallel work: 2 subagents, decisions reviewed before code
 - Considered: build everything sequentially · 5 agents, one per area · 2 agents with strict file ownership
 - Chose 2 agents (clusterstate + controller; HTTP API + UI + `cmd/main.go`) in separate worktrees, after a shared contract is merged. Each agent proposes its design decisions first. They're reviewed (by me, then you) before any implementation. Only the lead deploys, and agents never edit DECISIONS.md.
+
+## Least-privilege deploy: no metrics endpoint, no helper roles
+- Considered: keep the scaffold's secure metrics + admin/editor/viewer ClusterRoles · drop them
+- Chose to drop them: secure metrics needs a cluster-wide create on tokenreviews/subjectaccessreviews, and nothing scrapes it. Unbound helper roles only widen what a mis-binding could grant. Both are commented out, so they're easy to restore.
+
+## Status patch: merge patch with optimistic lock
+- Considered: plain `MergeFrom` · full-status patch · `MergeFrom` + `MergeFromWithOptimisticLock`
+- Chose the optimistic lock: a stale cached base gets a 409 and retries after 1s, instead of a diff that silently leaves out a field the server has changed.
+
+## Spec edits bypass the write throttle
+- Considered: always throttle · write right away when `generation != status.observedGeneration`
+- Chose bypass: spec edits are rare and made by a person, so waiting up to 10m to see one take effect is worse than at most one extra write per edit.
+
+## ClusterView watch: generation-changed only
+- Considered: every update · `GenerationChangedPredicate`
+- Chose generation-changed: otherwise our own status patches retrigger reconciles.
+
+## Node event filter: create/delete + Ready changes only
+- Considered: Ready + capacity/allocatable/cordon · Ready only
+- Chose Ready only: it's the only node data the CR status holds. The UI reads capacity and cordons live from the cache, so other events would only cause reconciles that write nothing.
+
+## Throttle state: keyed by name + UID, dropped on NotFound, no hash
+- Considered: never clean up · finalizer · forget on NotFound; store a content hash or not
+- Chose forget on NotFound with a UID check: no extra writes or finalizer, and a recreated CR doesn't inherit the old window. No hash, because the ≥5s window is far longer than cache lag and the optimistic lock catches stale copies.
+
+## Controller tests: direct Reconcile + fake clock, plus one real-manager wiring test
+- Considered: a running manager with a fake clock · direct Reconcile only · both
+- Chose both: the workqueue's delays use real time, so throttle tests call Reconcile directly with a FakeClock. One Ordered envtest with a real manager covers watches and predicates using `Eventually`.
+
+## API reads: `mgr.GetCache()` with list/watch RBAC only
+- Considered: `mgr.GetClient()` · the cache as `client.Reader`
+- Chose the cache: a request can never fall through to the API server, and cache Gets need only list/watch, so no `get` verb on nodes or pods.
+
+## API routing: stdlib `http.ServeMux`, GET only
+- Considered: chi/gorilla · stdlib method patterns (which also answer HEAD) · stdlib + strict GET wrapper
+- Chose stdlib + strict GET: no dependency, and every method other than GET gets 405, matching "API is read-only (GET only)".
+
+## UI polling payload: `/api/v1/nodes` returns `{summary, nodes}`
+- Considered: two calls (`/summary` + `/nodes`) · one snapshot call
+- Chose one call: one build per poll, and the header always matches the cards. `/summary` stays for API consumers.
+
+## ETags: strong, sha256 of the response body
+- Considered: weak/strong; FNV/sha256; hash of the source state vs. the body
+- Chose a strong sha256 of the body: it's exactly what was sent, including the effect of the namespace filter, and cheap at these sizes. The UI fetches with `cache: no-store` so the 304 reaches the JS.
+
+## Cache transforms: strip Pod bulk and Node `status.images`
+- Considered: no transform · `DefaultTransform` · per-type `ByObject` transforms
+- Chose per-type: Pods drop managedFields, annotations, env/envFrom/volumeMounts/volumes; Nodes drop managedFields and `status.images` (often the largest field). ClusterView is untouched. A test checks that `clusterstate.Build` gives the same result on transformed objects.
+
+## API server runnable: no leader election
+- Considered: leader-only · every replica
+- Chose every replica: it's read-only and the cache runs on non-leaders too. It starts after the cache syncs, so it never serves a cold cache.
