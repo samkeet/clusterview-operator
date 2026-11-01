@@ -1,5 +1,8 @@
-# Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+# Image URL to use all building/pushing image targets.
+# Tagged with the git short SHA so every deploy pulls a new, unambiguous image.
+IMG ?= ghcr.io/samkeet/clusterview-operator:$(shell git rev-parse --short HEAD)
+# The DOKS nodes are amd64. Pinning the platform keeps an arm64 laptop from shipping an arm64 image.
+IMAGE_PLATFORM ?= linux/amd64
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -14,7 +17,8 @@ endif
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
 # tools. (i.e. podman)
-CONTAINER_TOOL ?= docker
+# podman is the local container engine here (Docker isn't installed).
+CONTAINER_TOOL ?= podman
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -123,7 +127,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # make docker-build IMG=<img> BASE_IMAGE=docker.io/library/golang:1.26
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) -t ${IMG} .
+	$(CONTAINER_TOOL) build --platform=$(IMAGE_PLATFORM) $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

@@ -7,6 +7,10 @@
 # such as !cmd, !api, and !internal.
 # See https://github.com/containers/buildah/issues/6417
 !**/*.go
+# buildah (podman) doesn't apply the glob above, so re-include the source dirs by name.
+!cmd
+!api
+!internal
 **/*_test.go
 
 # Re-include Go module files
