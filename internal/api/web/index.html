@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClusterView</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>ClusterView</h1>
+    <div id="summary" class="summary">Loading…</div>
+    <div id="updated" class="updated"></div>
+  </header>
+
+  <div id="banner" class="banner" role="status" hidden></div>
+
+  <main id="content">
+    <section id="nodes" class="nodes" aria-label="Nodes"></section>
+
+    <section id="pods" class="pods" aria-label="Pods on the selected node" hidden>
+      <div class="pods-head">
+        <h2 id="pods-title"></h2>
+        <button id="pods-close" type="button">Close</button>
+      </div>
+      <div id="pods-banner" class="banner" role="status" hidden></div>
+      <table>
+        <thead>
+          <tr><th>Namespace</th><th>Name</th><th>Phase</th><th class="num">Restarts</th></tr>
+        </thead>
+        <tbody id="pods-body"></tbody>
+      </table>
+      <p id="pods-empty" class="muted" hidden>No pods on this node.</p>
+    </section>
+  </main>
+</body>
+</html>
