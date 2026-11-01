@@ -30,10 +30,8 @@ resources:
 # [METRICS] Disabled: nothing scrapes it, and secure metrics needs cluster-wide
 # tokenreviews/subjectaccessreviews create. Re-enable this together with the patch below.
 #- metrics_service.yaml
-# [NETWORK POLICY] Control ingress to metrics and webhook ports.
-# Allow metrics traffic from pods in namespaces labeled 'metrics: enabled'.
-# Allow webhook traffic from all sources.
-#- ../network-policy
+# [NETWORK POLICY] Restricts the manager pod's traffic (see config/network-policy).
+- ../network-policy
 
 # Uncomment the patches line if you enable Metrics
 #patches:

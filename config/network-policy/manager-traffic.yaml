@@ -1,0 +1,37 @@
+# Network access for the manager pod. Standard networking.k8s.io/v1 only, so it
+# works on any CNI that enforces NetworkPolicy (Cilium on DOKS).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterview-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: manager-traffic
+  namespace: system
+spec:
+  podSelector:
+    matchLabels:
+      control-plane: controller-manager
+      app.kubernetes.io/name: clusterview-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Probes. Traffic from the pod's own node (the kubelet) is already allowed by
+    # NetworkPolicy semantics; this rule keeps them working on a stricter CNI.
+    - ports:
+        - port: health
+          protocol: TCP
+    # No rule for 8080 (http) yet: the API has no auth, so in-cluster pods are
+    # blocked until the LoadBalancer step opens it. kubectl port-forward still
+    # works, because it connects over the pod's loopback, which policy never sees.
+  egress:
+    # The manager only talks to the API server. Allowing TCP 443 to any host is
+    # portable and simple, but it also permits HTTPS to anywhere else. An ipBlock
+    # on the API server IP would be tighter but is cluster-specific. No DNS rule:
+    # the in-cluster config uses the KUBERNETES_SERVICE_HOST IP. Policy matches
+    # the endpoint port after Service translation; DOKS serves the API on 443,
+    # but kind/kubeadm serve it on 6443, so add that port when deploying there.
+    - ports:
+        - port: 443
+          protocol: TCP

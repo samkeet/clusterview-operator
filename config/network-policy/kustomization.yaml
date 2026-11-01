@@ -1,2 +1,5 @@
 resources:
-- allow-metrics-traffic.yaml
+- manager-traffic.yaml
+# Disabled with the metrics endpoint (see config/default). Policies are additive,
+# so leaving it in would open 8443 from namespaces labeled 'metrics: enabled'.
+#- allow-metrics-traffic.yaml
