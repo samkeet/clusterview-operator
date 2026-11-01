@@ -21,38 +21,83 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// ClusterViewSpec defines the desired state of ClusterView
+// ClusterViewSpec configures what the operator observes.
+// +kubebuilder:validation:XValidation:rule="!has(self.refreshInterval) || (duration(self.refreshInterval) >= duration('5s') && duration(self.refreshInterval) <= duration('10m'))",message="refreshInterval must be between 5s and 10m"
 type ClusterViewSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of ClusterView. Edit clusterview_types.go to remove/update
+	// namespaces limits which pods are counted. Empty means all namespaces.
+	// Nodes are always cluster-wide, since a namespace filter on nodes has no meaning.
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=100
+	// +kubebuilder:validation:items:MaxLength=63
+	Namespaces []string `json:"namespaces,omitempty"`
+
+	// refreshInterval is the minimum time between status writes, not a polling
+	// interval. Reads come from the informer cache. This only caps how often the
+	// summary is written back to the API server, so bursts of pod churn coalesce.
+	// +optional
+	// +kubebuilder:default="10s"
+	RefreshInterval metav1.Duration `json:"refreshInterval,omitzero"`
 }
 
-// ClusterViewStatus defines the observed state of ClusterView.
+// NodeReadiness is derived from the node's Ready condition.
+// +kubebuilder:validation:Enum=Ready;NotReady;Unknown
+type NodeReadiness string
+
+const (
+	// NodeReady means the Ready condition is True.
+	NodeReady NodeReadiness = "Ready"
+	// NodeNotReady means the Ready condition is False: the kubelet reports itself unhealthy.
+	NodeNotReady NodeReadiness = "NotReady"
+	// NodeUnknown means the Ready condition is Unknown or missing: the control plane
+	// lost contact with the kubelet, or the node just registered.
+	NodeUnknown NodeReadiness = "Unknown"
+)
+
+// NodeSummary is the per-node slice of the status. It holds counts only. Pod and
+// resource detail is served by the HTTP API so the CR stays small on big clusters.
+type NodeSummary struct {
+	// name of the node.
+	Name string `json:"name"`
+	// status derived from the node's Ready condition.
+	Status NodeReadiness `json:"status"`
+	// podCount is the number of pods bound to this node that pass the namespace filter.
+	PodCount int32 `json:"podCount"`
+}
+
+// ClusterViewStatus is an aggregated, throttled sample of cluster state.
 type ClusterViewStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// observedGeneration is the spec generation this status was computed from.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// lastUpdated is when the status content last changed (and so was last written).
+	// The controller also uses it as the start of the write-throttle window.
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
 
-	// conditions represent the current state of the ClusterView resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// +optional
+	NodeCount int32 `json:"nodeCount"`
+	// +optional
+	ReadyNodes int32 `json:"readyNodes"`
+	// notReadyNodes counts nodes whose status is NotReady or Unknown.
+	// +optional
+	NotReadyNodes int32 `json:"notReadyNodes"`
+	// podCount is the number of pods that pass the namespace filter, including unscheduled ones.
+	// +optional
+	PodCount int32 `json:"podCount"`
+
+	// podPhases maps a pod phase (Pending, Running, Succeeded, Failed, Unknown) to a count.
+	// +optional
+	PodPhases map[string]int32 `json:"podPhases,omitempty"`
+
+	// nodes holds per-node readiness and pod counts.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Nodes []NodeSummary `json:"nodes,omitempty"`
+
+	// conditions: Ready=True when the last reconcile observed and recorded state successfully.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -61,7 +106,11 @@ type ClusterViewStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:resource:scope=Cluster,shortName=cv
+// +kubebuilder:printcolumn:name="Nodes",type=integer,JSONPath=`.status.nodeCount`
+// +kubebuilder:printcolumn:name="Ready",type=integer,JSONPath=`.status.readyNodes`
+// +kubebuilder:printcolumn:name="Pods",type=integer,JSONPath=`.status.podCount`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ClusterView is the Schema for the clusterviews API
 type ClusterView struct {
@@ -71,11 +120,11 @@ type ClusterView struct {
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec defines the desired state of ClusterView
-	// +required
+	// spec defines what to observe
+	// +optional
 	Spec ClusterViewSpec `json:"spec"`
 
-	// status defines the observed state of ClusterView
+	// status is the observed, aggregated cluster state
 	// +optional
 	Status ClusterViewStatus `json:"status,omitzero"`
 }
