@@ -4,10 +4,22 @@
 package api
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	// writeTimeout leaves room for a large /nodes body on a slow link.
+	writeTimeout = 30 * time.Second
+	// shutdownTimeout fits inside the pod's 10s terminationGracePeriodSeconds.
+	shutdownTimeout = 5 * time.Second
 )
 
 // Server is the HTTP API and UI.
@@ -19,6 +31,52 @@ type Server struct {
 	// ClusterViewName names the ClusterView whose spec.namespaces filters pods.
 	ClusterViewName string
 	Log             logr.Logger
+}
+
+// NeedLeaderElection lets every replica serve: the server is read-only and the
+// informer cache runs on non-leaders too. As a non-leader runnable it's started
+// only after the cache has synced, so it never serves a cold cache.
+func (s *Server) NeedLeaderElection() bool { return false }
+
+// Start implements manager.Runnable. It blocks until ctx is cancelled, then shuts
+// down gracefully so in-flight requests can finish.
+func (s *Server) Start(ctx context.Context) error {
+	// Listen synchronously so a bad or busy address fails the manager at startup.
+	ln, err := net.Listen("tcp", s.Addr)
+	if err != nil {
+		return fmt.Errorf("listening on %s: %w", s.Addr, err)
+	}
+	srv := &http.Server{
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+		// No BaseContext from ctx: that would cancel in-flight requests the moment
+		// shutdown starts, defeating the graceful drain below.
+	}
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+	s.Log.Info("Serving API and UI", "addr", ln.Addr().String())
+
+	select {
+	case err := <-serveErr:
+		return fmt.Errorf("serving HTTP: %w", err)
+	case <-ctx.Done():
+	}
+
+	s.Log.Info("Shutting down API server")
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutting down HTTP server: %w", err)
+	}
+	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serving HTTP: %w", err)
+	}
+	return nil
 }
 
 // Handler returns the routes wrapped in the GET-only and security-header middleware.
