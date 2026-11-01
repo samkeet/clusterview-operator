@@ -63,6 +63,10 @@ spec:
         - containerPort: 8081
           name: health
           protocol: TCP
+        # Read-only HTTP API and UI.
+        - containerPort: 8080
+          name: http
+          protocol: TCP
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
