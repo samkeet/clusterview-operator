@@ -52,7 +52,9 @@ type ClusterViewReconciler struct {
 }
 
 // +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews,verbs=get;list;watch
-// +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews/status,verbs=get;update;patch
+// Status is only ever written with Status().Patch and never read through the
+// subresource, so patch is the one verb it needs.
+// +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews/status,verbs=patch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=list;watch
 
