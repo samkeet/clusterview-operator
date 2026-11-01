@@ -60,7 +60,7 @@ One block per decision: the options we considered, then what we picked and why. 
 
 ## Parallel work: 2 subagents, decisions reviewed before code
 - Considered: build everything sequentially · 5 agents, one per area · 2 agents with strict file ownership
-- Chose 2 agents (clusterstate + controller; HTTP API + UI + `cmd/main.go`) in separate worktrees, after a shared contract is merged. Each agent proposes its design decisions first. They're reviewed (by me, then you) before any implementation. Only the lead deploys, and agents never edit DECISIONS.md.
+- Chose 2 agents (controller; HTTP API + UI + `cmd/main.go`) in separate worktrees, after a shared contract is merged. The lead wrote `clusterstate` in Wave 0, so both agents build against real code instead of stubs and neither waits on the other. Each agent proposes its design decisions first. They're reviewed (by me, then you) before any implementation. Only the lead deploys, and agents never edit DECISIONS.md.
 
 ## Least-privilege deploy: no metrics endpoint, no helper roles
 - Considered: keep the scaffold's secure metrics + admin/editor/viewer ClusterRoles · drop them
@@ -113,3 +113,63 @@ One block per decision: the options we considered, then what we picked and why. 
 ## API server runnable: no leader election
 - Considered: leader-only · every replica
 - Chose every replica: it's read-only and the cache runs on non-leaders too. It starts after the cache syncs, so it never serves a cold cache.
+
+## CR status holds counts only, never per-pod lists
+- Considered: full pod list in status · per-node pod lists · counts only (per-phase, per-node)
+- Chose counts only: etcd caps an object at about 1.5MB, and every status write sends the whole status. Pod and resource detail is served by the HTTP API from the cache.
+
+## Namespace filter applies to pods only
+- Considered: filter pods and nodes · pods only
+- Chose pods only: nodes aren't namespaced, so node counts and readiness always cover the whole cluster.
+
+## Sample `ClusterView` named `cluster`, applied separately
+- Considered: include `config/samples` in `config/default` · apply it on its own
+- Chose apply it on its own: kustomize's `namePrefix` would rename it to `clusterview-operator-cluster`, which breaks the API's lookup by name (`--clusterview-name=cluster`). Apply it with `kubectl apply -f config/samples/`.
+
+## `clusterstate` is pure and deterministic
+- Considered: compute inside the controller and API separately · one shared package that takes a client · one pure package (no client, no clock)
+- Chose a pure shared package: the CR status and the API can't disagree, and it's fully table-testable. Restarts include init containers (crash-looping init should show). Resources are plain integers (milli-CPU, bytes) so the UI doesn't parse Quantities. Heartbeat times are dropped and nodes sorted, so the output is stable for change detection and ETags.
+
+## Namespace-filter read failure: return 500, don't fall back
+- Considered: fall back to all namespaces · return 500
+- Chose 500: a fallback would show namespaces the user had excluded. A missing ClusterView (NotFound) still means all namespaces.
+
+## UI-side security: no CORS, strict CSP, no HTML from data (CSP/headers deferred)
+- Considered: permissive CORS · no CORS; no headers · CSP + nosniff + X-Frame-Options + Referrer-Policy; `innerHTML` · `textContent`
+- Chose no CORS, `textContent` only, and JS/CSS in separate files. Without CORS, other websites can't read a localhost port-forward. `textContent` means API data is never parsed as HTML. The CSP (`default-src 'self'; frame-ancestors 'none'`) and the nosniff, X-Frame-Options and Referrer-Policy headers **landed early** in the API PR. They were already committed before the deferral reached the agent, and removing them was blocked as weakening security, so we kept them. They're still reviewed in the end-of-project security pass.
+
+## Manager pinned to amd64 nodes, 256Mi memory limit
+- Considered: no affinity · multi-arch image · amd64 affinity; scaffold 128Mi · 256Mi
+- Chose amd64 affinity: the image is amd64-only, and an arm64 node would crash-loop it with exec format errors. A multi-arch build isn't needed for this cluster. Memory is dominated by the cluster-wide Pod/Node cache, so 256Mi; raise it for larger clusters.
+
+## golangci-lint v2.15.0
+- Considered: pin Go back to 1.26 · golangci-lint v2.13.1 · v2.15.0
+- Chose v2.15.0: Homebrew upgraded Go to 1.27, and v2.13.1 can't read its export data. Note that `.custom-gcl.yml` pins its own version and overrides the Makefile, so bump both together.
+
+## Removed manifests are deleted by hand
+- Considered: `kubectl apply --prune` · ApplySets · delete orphans by hand
+- Chose by hand for now: `make deploy` runs `kubectl apply`, which never deletes objects dropped from the manifests (e.g. the old metrics roles). `--prune` with label selectors can delete the wrong things, and that rarely happens here. Revisit if manifests start changing often.
+
+## Status RBAC: `patch` only on `clusterviews/status`
+- Considered: `get;update;patch` (scaffold) · `get;patch` (issue #7) · `patch`
+- Chose `patch`: the only status write is `Status().Patch`, and status reads go through the cached ClusterView (list/watch). Note for checking: `kubectl auth can-i ... clusterviews/status` treats `status` as an object name, so use `--subresource=status`.
+
+## Leader-election Role: leases get/create/update, events create/patch, no ConfigMaps
+- Considered: keep the scaffold · drop ConfigMaps only · drop ConfigMaps and narrow verbs · also pin `resourceNames`
+- Chose narrowed verbs: client-go's Lease lock only calls Get/Create/Update (releasing the lease is also an Update), and the event recorder only calls Create/Patch. controller-runtime defaults to Leases, so the ConfigMaps rule was dead and let the pod rewrite any ConfigMap in the namespace. No `resourceNames`: ours is the only lease there, and pinning it would tie the Role to `LeaderElectionID`.
+
+## Ingress NetworkPolicy: health port only until the LoadBalancer
+- Considered: no policy · allow 8080 + 8081 from anywhere · allow only 8081, with no pod sources on 8080
+- Chose 8081 only: without it, any pod in the cluster can read the node/pod inventory from :8080 with no RBAC. `kubectl port-forward` reaches the pod over loopback and kubelet probes come from the node, so neither is affected. 8080 is opened deliberately at the LoadBalancer step.
+
+## Egress NetworkPolicy: TCP 443 to any destination
+- Considered: no restriction · standard `ipBlock` on the API server IP (`10.100.0.2/32`) · TCP 443 anywhere · CiliumNetworkPolicy `toEntities: kube-apiserver`
+- Chose TCP 443 anywhere (keep it simple): standard NetworkPolicy, works unchanged on any cluster, and blocks DNS and all other ports. The operator only talks to the API server by IP, and image pulls are done by the kubelet. Tradeoff: a compromised pod could still reach any HTTPS host. The `ipBlock` was rejected because the IP is cluster-specific and would break if DigitalOcean moved it, and the Cilium policy because it's CNI-specific.
+
+## API payload: drop node condition `message` and `kubeletVersion`
+- Considered: keep everything · trim before going public · trim now
+- Chose trim now: condition messages are free-form kubelet/CNI text (versions, paths, runtime errors), and the kubelet version makes CVE targeting easier. The UI shows neither. Kept: `type`/`status`/`reason`, node name, instance type, arch, resources.
+
+## Before a public LoadBalancer: check the NodePort path
+- Considered: rely on `loadBalancerSourceRanges` alone · also confirm NodePorts aren't publicly reachable
+- Chose to confirm first: a LoadBalancer Service also opens a NodePort on every node. If the DOKS firewall allows 30000-32767, traffic to a node's public IP skips the LB's source-range firewall, and only app-level auth would cover it. The LB access method (source ranges vs auth, TLS) is decided at that step.
