@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -21,7 +22,7 @@ func baseStatus() *observev1alpha1.ClusterViewStatus {
 		ReadyNodes:         1,
 		NotReadyNodes:      1,
 		PodCount:           3,
-		PodPhases:          map[string]int32{"Running": 2, "Pending": 1},
+		PodPhases:          map[string]int32{string(corev1.PodRunning): 2, string(corev1.PodPending): 1},
 		Nodes: []observev1alpha1.NodeSummary{
 			{Name: "a", Status: observev1alpha1.NodeReady, PodCount: 2},
 			{Name: "b", Status: observev1alpha1.NodeNotReady, PodCount: 1},
@@ -50,8 +51,8 @@ func TestContentEqual(t *testing.T) {
 		{"node count", func(s *observev1alpha1.ClusterViewStatus) { s.NodeCount = 3 }, false},
 		{"ready nodes", func(s *observev1alpha1.ClusterViewStatus) { s.ReadyNodes = 2 }, false},
 		{"pod count", func(s *observev1alpha1.ClusterViewStatus) { s.PodCount = 4 }, false},
-		{"phase count", func(s *observev1alpha1.ClusterViewStatus) { s.PodPhases["Running"] = 3 }, false},
-		{"phase removed", func(s *observev1alpha1.ClusterViewStatus) { delete(s.PodPhases, "Pending") }, false},
+		{"phase count", func(s *observev1alpha1.ClusterViewStatus) { s.PodPhases[string(corev1.PodRunning)] = 3 }, false},
+		{"phase removed", func(s *observev1alpha1.ClusterViewStatus) { delete(s.PodPhases, string(corev1.PodPending)) }, false},
 		{"node status", func(s *observev1alpha1.ClusterViewStatus) {
 			s.Nodes[1].Status = observev1alpha1.NodeUnknown
 		}, false},
@@ -86,7 +87,7 @@ func TestApplySnapshot(t *testing.T) {
 	snap := clusterstate.Snapshot{
 		Summary: clusterstate.Summary{
 			NodeCount: 2, ReadyNodes: 1, NotReadyNodes: 1, PodCount: 3, UnscheduledPods: 0,
-			PodPhases: map[string]int32{"Running": 2, "Pending": 1},
+			PodPhases: map[string]int32{string(corev1.PodRunning): 2, string(corev1.PodPending): 1},
 		},
 		Nodes: []clusterstate.NodeInfo{
 			{Name: "a", Status: observev1alpha1.NodeReady, PodCount: 2, Schedulable: true},

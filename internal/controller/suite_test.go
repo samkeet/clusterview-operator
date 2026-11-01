@@ -145,7 +145,7 @@ func setNodeReady(n *corev1.Node, ready corev1.ConditionStatus) {
 	Expect(k8sClient.Status().Update(ctx, n)).To(Succeed())
 }
 
-func createPod(namespace, name, nodeName string, phase corev1.PodPhase) *corev1.Pod {
+func createPod(namespace, name, nodeName string, phase corev1.PodPhase) {
 	GinkgoHelper()
 	p := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
@@ -157,7 +157,6 @@ func createPod(namespace, name, nodeName string, phase corev1.PodPhase) *corev1.
 	Expect(k8sClient.Create(ctx, p)).To(Succeed())
 	p.Status.Phase = phase
 	Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
-	return p
 }
 
 func createClusterView(name string, spec observev1alpha1.ClusterViewSpec) *observev1alpha1.ClusterView {
