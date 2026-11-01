@@ -25,6 +25,4 @@ rules:
   resources:
   - clusterviews/status
   verbs:
-  - get
   - patch
-  - update
