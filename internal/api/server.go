@@ -88,6 +88,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/nodes", s.nodes)
 	mux.HandleFunc("/api/v1/nodes/{name}/pods", s.nodePods)
 	mux.HandleFunc("/healthz", healthz)
+	// "/{$}" matches only the root, so unknown paths 404 instead of serving the UI.
+	mux.HandleFunc("/{$}", index)
+	mux.Handle("/static/", static())
 	return securityHeaders(getOnly(mux))
 }
 

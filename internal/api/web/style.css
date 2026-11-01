@@ -1,0 +1,102 @@
+:root {
+  --fg: #1f2328;
+  --muted: #656d76;
+  --border: #d0d7de;
+  --bg: #f6f8fa;
+  --card: #ffffff;
+  --accent: #0969da;
+  --ok: #1a7f37;
+  --bad: #cf222e;
+  --unknown: #9a6700;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 24px;
+  padding: 12px 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+h1 { font-size: 18px; margin: 0; }
+h2 { font-size: 16px; margin: 0; }
+
+.summary { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.summary b { font-variant-numeric: tabular-nums; }
+.updated, .muted { color: var(--muted); }
+
+.banner {
+  margin: 12px 20px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--bad);
+  border-radius: 6px;
+  background: #ffebe9;
+}
+
+/* Last good data stays visible but dimmed while the API is unreachable. */
+.stale { opacity: 0.5; }
+
+main { padding: 16px 20px; display: grid; gap: 16px; }
+
+.nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.node {
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.node:hover { border-color: var(--accent); }
+.node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+
+.node-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.node-name { font-weight: 600; margin-right: auto; word-break: break-all; }
+
+.badge {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  color: #fff;
+}
+.badge.Ready { background: var(--ok); }
+.badge.NotReady { background: var(--bad); }
+.badge.Unknown { background: var(--unknown); }
+.badge.cordoned { background: var(--muted); }
+
+.metrics { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+.metrics dt { color: var(--muted); }
+.metrics dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.pods {
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.pods-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.pods .banner { margin: 0 0 8px; border-color: var(--unknown); background: #fff8c5; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.restarts-high { color: var(--bad); font-weight: 600; }
