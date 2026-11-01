@@ -18,6 +18,8 @@ resources:
 - ../crd
 - ../rbac
 - ../manager
+# ClusterIP Service for the read-only API/UI (port-forward for now).
+- ../ui
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
 # crd/kustomization.yaml
 #- ../webhook
@@ -25,20 +27,21 @@ resources:
 #- ../certmanager
 # [PROMETHEUS] To enable prometheus monitor, uncomment all sections with 'PROMETHEUS'.
 #- ../prometheus
-# [METRICS] Expose the controller manager metrics service.
-- metrics_service.yaml
+# [METRICS] Disabled: nothing scrapes it, and secure metrics needs cluster-wide
+# tokenreviews/subjectaccessreviews create. Re-enable this together with the patch below.
+#- metrics_service.yaml
 # [NETWORK POLICY] Control ingress to metrics and webhook ports.
 # Allow metrics traffic from pods in namespaces labeled 'metrics: enabled'.
 # Allow webhook traffic from all sources.
 #- ../network-policy
 
 # Uncomment the patches line if you enable Metrics
-patches:
+#patches:
 # [METRICS] The following patch will enable the metrics endpoint using HTTPS and the port :8443.
 # More info: https://book.kubebuilder.io/reference/metrics
-- path: manager_metrics_patch.yaml
-  target:
-    kind: Deployment
+#- path: manager_metrics_patch.yaml
+#  target:
+#    kind: Deployment
 
 # Uncomment the patches line if you enable Metrics and CertManager
 # [METRICS-WITH-CERTS] To enable metrics protected with certManager, uncomment the following line.
