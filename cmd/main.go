@@ -25,10 +25,13 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -36,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	observev1alpha1 "github.com/samkeet/clusterview-operator/api/v1alpha1"
+	"github.com/samkeet/clusterview-operator/internal/api"
 	"github.com/samkeet/clusterview-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -63,8 +67,9 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	var apiAddr, clusterViewName string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
-		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
+		"Use :8443 for HTTPS or :8082 for HTTP (:8080 is the API), or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -82,6 +87,10 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&apiAddr, "api-bind-address", ":8080", "The address the read-only HTTP API and UI bind to.")
+	flag.StringVar(&clusterViewName, "clusterview-name", "cluster",
+		"The ClusterView whose spec.namespaces filters the pods shown by the API. "+
+			"If it is missing, all namespaces are shown.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -165,6 +174,15 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "d1219877.samkeet.org",
+		// Per-type transforms shrink cached Pods and Nodes to what clusterstate and
+		// the controller read. ByObject (not DefaultTransform) leaves ClusterView,
+		// which the controller patches, untouched.
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Pod{}:  {Transform: api.StripPod},
+				&corev1.Node{}: {Transform: api.StripNode},
+			},
+		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -182,6 +200,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// SetupSignalHandler may be called only once; its context also bounds the
+	// index registration below.
+	ctx := ctrl.SetupSignalHandler()
+
+	// Index pods by node so /api/v1/nodes/{name}/pods reads only that node's pods.
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, api.PodNodeNameField, api.PodNodeName); err != nil {
+		setupLog.Error(err, "Failed to index pods", "field", api.PodNodeNameField)
+		os.Exit(1)
+	}
+
 	if err := (&controller.ClusterViewReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -190,6 +218,18 @@ func main() {
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
+
+	// The API reads from the cache only (mgr.GetCache, not mgr.GetClient), so a
+	// request can never fall through to the API server.
+	if err := mgr.Add(&api.Server{
+		Addr:            apiAddr,
+		Reader:          mgr.GetCache(),
+		ClusterViewName: clusterViewName,
+		Log:             ctrl.Log.WithName("api"),
+	}); err != nil {
+		setupLog.Error(err, "Failed to add API server")
+		os.Exit(1)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Failed to set up health check")
@@ -201,7 +241,7 @@ func main() {
 	}
 
 	setupLog.Info("Starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}
