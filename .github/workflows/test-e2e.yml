@@ -33,6 +33,11 @@ jobs:
         run: kind version
 
       - name: Running Test e2e
+        # kind loads images from the Docker daemon. The Makefile defaults to podman,
+        # which the runner also has, so without this the image lands in podman's
+        # store and `kind load docker-image` can't find it.
+        env:
+          CONTAINER_TOOL: docker
         run: |
           go mod tidy
           make test-e2e
