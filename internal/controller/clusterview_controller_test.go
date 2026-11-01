@@ -17,71 +17,92 @@ limitations under the License.
 package controller
 
 import (
-	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
+	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clocktesting "k8s.io/utils/clock/testing"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	observev1alpha1 "github.com/samkeet/clusterview-operator/api/v1alpha1"
 )
 
-var _ = Describe("ClusterView Controller", func() {
-	Context("When reconciling a resource", func() {
-		const (
-			resourceName      = "test-resource"
-			resourceNamespace = "default"
-		)
+// These specs call Reconcile directly with a fake clock and the uncached k8sClient,
+// so every step is deterministic: no cache lag, no workqueue timing.
+var _ = Describe("ClusterView reconcile", func() {
+	const cvName = "cluster"
 
-		ctx := context.Background()
+	var (
+		ns    string
+		clk   *clocktesting.FakeClock
+		r     *ClusterViewReconciler
+		cv    *observev1alpha1.ClusterView
+		start = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	)
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: resourceNamespace,
-		}
-		clusterview := &observev1alpha1.ClusterView{}
+	reconcileOnce := func() reconcile.Result {
+		GinkgoHelper()
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: cvName}})
+		Expect(err).NotTo(HaveOccurred())
+		return res
+	}
+	current := func() *observev1alpha1.ClusterView {
+		GinkgoHelper()
+		got := &observev1alpha1.ClusterView{}
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: cvName}, got)).To(Succeed())
+		return got
+	}
 
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind ClusterView")
-			err := k8sClient.Get(ctx, typeNamespacedName, clusterview)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &observev1alpha1.ClusterView{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: resourceNamespace,
-					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
+	BeforeEach(func() {
+		ns = createNamespace()
+		clk = clocktesting.NewFakeClock(start)
+		r = &ClusterViewReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Clock: clk}
+		cv = createClusterView(cvName, observev1alpha1.ClusterViewSpec{
+			Namespaces:      []string{ns},
+			RefreshInterval: metav1.Duration{Duration: 10 * time.Second},
 		})
+	})
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &observev1alpha1.ClusterView{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+	AfterEach(func() {
+		deleteClusterView(cv)
+		deleteAllNodes()
+	})
 
-			By("Cleanup the specific resource instance ClusterView")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &ClusterViewReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+	It("records counts for the nodes and pods in the cache", func() {
+		createNode("node-a", corev1.ConditionTrue)
+		createNode("node-b", corev1.ConditionFalse)
+		createNode("node-c", corev1.ConditionUnknown)
+		createPod(ns, "p1", "node-a", corev1.PodRunning)
+		createPod(ns, "p2", "node-a", corev1.PodRunning)
+		createPod(ns, "p3", "node-b", corev1.PodPending)
+		createPod(ns, "p4", "", corev1.PodPending)
+		// Outside the namespace filter, so it must not be counted.
+		createPod(createNamespace(), "other", "node-a", corev1.PodRunning)
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
-		})
+		res := reconcileOnce()
+		Expect(res.RequeueAfter).To(Equal(backstopInterval))
+
+		st := current().Status
+		Expect(st.ObservedGeneration).To(Equal(cv.Generation))
+		Expect(st.NodeCount).To(BeEquivalentTo(3))
+		Expect(st.ReadyNodes).To(BeEquivalentTo(1))
+		Expect(st.NotReadyNodes).To(BeEquivalentTo(2))
+		Expect(st.PodCount).To(BeEquivalentTo(4))
+		Expect(st.PodPhases).To(Equal(map[string]int32{"Running": 2, "Pending": 2}))
+		Expect(st.Nodes).To(Equal([]observev1alpha1.NodeSummary{
+			{Name: "node-a", Status: observev1alpha1.NodeReady, PodCount: 2},
+			{Name: "node-b", Status: observev1alpha1.NodeNotReady, PodCount: 1},
+			{Name: "node-c", Status: observev1alpha1.NodeUnknown, PodCount: 0},
+		}))
+		Expect(st.LastUpdated.Time).To(BeTemporally("==", start))
+
+		ready := apimeta.FindStatusCondition(st.Conditions, conditionReady)
+		Expect(ready).NotTo(BeNil())
+		Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+		Expect(ready.Reason).To(Equal(reasonReconciled))
 	})
 })

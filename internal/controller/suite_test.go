@@ -25,6 +25,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -113,4 +116,74 @@ func getFirstFoundEnvTestBinaryDir() string {
 		}
 	}
 	return ""
+}
+
+// The helpers below build objects through the API server. envtest has no kubelet,
+// scheduler or controllers, so status is set by hand and pods are bound directly.
+
+// createNamespace gives each spec its own pods. Namespaces are never removed in
+// envtest (there's no namespace controller), so each name is unique.
+func createNamespace() string {
+	GinkgoHelper()
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "cv-test-"}}
+	Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+	return ns.Name
+}
+
+func createNode(name string, ready corev1.ConditionStatus) *corev1.Node {
+	GinkgoHelper()
+	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	Expect(k8sClient.Create(ctx, n)).To(Succeed())
+	setNodeReady(n, ready)
+	return n
+}
+
+func setNodeReady(n *corev1.Node, ready corev1.ConditionStatus) {
+	GinkgoHelper()
+	Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(n), n)).To(Succeed())
+	n.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: ready}}
+	Expect(k8sClient.Status().Update(ctx, n)).To(Succeed())
+}
+
+func createPod(namespace, name, nodeName string, phase corev1.PodPhase) *corev1.Pod {
+	GinkgoHelper()
+	p := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		Spec: corev1.PodSpec{
+			NodeName:   nodeName,
+			Containers: []corev1.Container{{Name: "app", Image: "example.invalid/app"}},
+		},
+	}
+	Expect(k8sClient.Create(ctx, p)).To(Succeed())
+	p.Status.Phase = phase
+	Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
+	return p
+}
+
+func createClusterView(name string, spec observev1alpha1.ClusterViewSpec) *observev1alpha1.ClusterView {
+	GinkgoHelper()
+	cv := &observev1alpha1.ClusterView{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
+	Expect(k8sClient.Create(ctx, cv)).To(Succeed())
+	return cv
+}
+
+// deleteAllNodes keeps specs independent: nodes are cluster-scoped and every
+// ClusterView counts all of them. Without a kubelet or finalizers, deletes are immediate.
+func deleteAllNodes() {
+	GinkgoHelper()
+	Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+	Eventually(func(g Gomega) {
+		var nodes corev1.NodeList
+		g.Expect(k8sClient.List(ctx, &nodes)).To(Succeed())
+		g.Expect(nodes.Items).To(BeEmpty())
+	}).Should(Succeed())
+}
+
+func deleteClusterView(cv *observev1alpha1.ClusterView) {
+	GinkgoHelper()
+	err := k8sClient.Delete(ctx, cv)
+	Expect(client.IgnoreNotFound(err)).To(Succeed())
+	Eventually(func() bool {
+		return apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(cv), cv))
+	}).Should(BeTrue())
 }

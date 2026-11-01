@@ -18,46 +18,126 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	observev1alpha1 "github.com/samkeet/clusterview-operator/api/v1alpha1"
+	"github.com/samkeet/clusterview-operator/internal/clusterstate"
 )
 
-// ClusterViewReconciler reconciles a ClusterView object
+// ClusterViewReconciler writes a throttled summary of Nodes and Pods into each
+// ClusterView's status. All reads come from the manager's informer cache, so the
+// status writes are the only API server load it adds.
 type ClusterViewReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// Clock is injectable so tests can step through the throttle window. Nil means
+	// the real clock, so cmd/main.go doesn't have to set it.
+	Clock clock.PassiveClock
+
+	writes writeTracker
 }
 
-// +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews,verbs=get;list;watch
 // +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=observe.samkeet.org,resources=clusterviews/finalizers,verbs=update
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the ClusterView object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.25.0/pkg/reconcile
+// Reconcile is level-triggered: each run rebuilds the summary from the whole cache,
+// so a deferred or coalesced run never loses an event.
 func (r *ClusterViewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	var cv observev1alpha1.ClusterView
+	if err := r.Get(ctx, req.NamespacedName, &cv); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.writes.forget(req.Name)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("getting ClusterView %q: %w", req.Name, err)
+	}
 
-	return ctrl.Result{}, nil
+	now := r.now()
+	desired := cv.Status.DeepCopy()
+	observeErr := r.observe(ctx, &cv, desired, now)
+
+	last := lastWriteTime(cv.Status.LastUpdated, r.writes.get(cv.Name, cv.UID))
+	write, after := decide(now, last, cv.Spec.RefreshInterval.Duration,
+		!contentEqual(&cv.Status, desired), cv.Generation != cv.Status.ObservedGeneration)
+	if !write {
+		if observeErr != nil {
+			return ctrl.Result{}, observeErr
+		}
+		log.V(1).Info("Status write skipped", "requeueAfter", after)
+		return ctrl.Result{RequeueAfter: after}, nil
+	}
+
+	desired.LastUpdated = &metav1.Time{Time: now}
+	updated := cv.DeepCopy()
+	updated.Status = *desired
+	// The optimistic lock turns a stale cached base into a 409. A plain merge patch
+	// would diff against the stale copy and could leave out a field that differs on
+	// the server.
+	patch := client.MergeFromWithOptions(&cv, client.MergeFromWithOptimisticLock{})
+	if err := r.Status().Patch(ctx, updated, patch); err != nil {
+		if apierrors.IsConflict(err) && observeErr == nil {
+			log.V(1).Info("Status patch conflicted with a newer version, retrying")
+			return ctrl.Result{RequeueAfter: conflictRetry}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("patching ClusterView %q status: %w", cv.Name, err)
+	}
+	r.writes.record(cv.Name, cv.UID, now)
+	log.V(1).Info("Status written", "nodes", desired.NodeCount, "pods", desired.PodCount)
+
+	if observeErr != nil {
+		return ctrl.Result{}, observeErr
+	}
+	return ctrl.Result{RequeueAfter: after}, nil
+}
+
+// observe fills st from the cache. On a list failure it keeps the previous counts
+// and sets Ready=False, so the CR shows the failure instead of looking healthy with
+// stale numbers.
+func (r *ClusterViewReconciler) observe(ctx context.Context, cv *observev1alpha1.ClusterView,
+	st *observev1alpha1.ClusterViewStatus, now time.Time) error {
+	var nodes corev1.NodeList
+	if err := r.List(ctx, &nodes); err != nil {
+		setReady(st, cv.Generation, metav1.ConditionFalse, reasonListNodesFailed, "Listing nodes from the cache failed", now)
+		return fmt.Errorf("listing nodes: %w", err)
+	}
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods); err != nil {
+		setReady(st, cv.Generation, metav1.ConditionFalse, reasonListPodsFailed, "Listing pods from the cache failed", now)
+		return fmt.Errorf("listing pods: %w", err)
+	}
+
+	applySnapshot(st, clusterstate.Build(nodes.Items, pods.Items, cv.Spec.Namespaces))
+	st.ObservedGeneration = cv.Generation
+	setReady(st, cv.Generation, metav1.ConditionTrue, reasonReconciled, "Status reflects the informer cache", now)
+	return nil
+}
+
+func (r *ClusterViewReconciler) now() time.Time {
+	if r.Clock == nil {
+		return clock.RealClock{}.Now()
+	}
+	return r.Clock.Now()
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterViewReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&observev1alpha1.ClusterView{}).
+		// Generation-only, so our own status patches don't retrigger a reconcile.
+		For(&observev1alpha1.ClusterView{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("clusterview").
 		Complete(r)
 }
