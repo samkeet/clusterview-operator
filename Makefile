@@ -201,8 +201,8 @@ demo-down: kustomize ## Delete the demo workload.
 	"$(KUSTOMIZE)" build config/demo | "$(KUBECTL)" delete --ignore-not-found -f -
 
 .PHONY: ui
-ui: ## Port-forward the UI to http://localhost:8080 (Ctrl-C to stop).
-	"$(KUBECTL)" -n clusterview-operator-system port-forward svc/clusterview-operator-ui 8080:80
+ui: ## Port-forward the UI and open it (random free port if 8080 is taken; Ctrl-C to stop).
+	@KUBECTL="$(KUBECTL)" PORT="$(PORT)" NO_BROWSER="$(NO_BROWSER)" ./hack/ui.sh
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
