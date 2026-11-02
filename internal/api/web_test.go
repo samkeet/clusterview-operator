@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,6 +47,36 @@ func TestUIRejectsNonGET(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequest(m, "/", nil))
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Errorf("%s /: status = %d, want 405", m, rec.Code)
+		}
+	}
+}
+
+// TestUIBuildsDOMWithoutHTMLParsing guards the textContent-only rule: API data
+// (pod names, event messages) must never be parsed as HTML. It matches property
+// and call syntax, so the header comment that names the rule doesn't trip it.
+func TestUIBuildsDOMWithoutHTMLParsing(t *testing.T) {
+	js, err := fs.ReadFile(webFS, "app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, banned := range []string{".innerHTML", ".outerHTML", "insertAdjacentHTML(", "document.write(", "eval("} {
+		if strings.Contains(string(js), banned) {
+			t.Errorf("app.js uses %s; build DOM with textContent instead", banned)
+		}
+	}
+}
+
+func TestUIHasPodDrawer(t *testing.T) {
+	body := get(t, newHandler(t, nil), "/").Body.String()
+	for _, want := range []string{`id="drawer"`, `role="dialog"`, `role="tablist"`, `id="panel-events"`, `id="panel-logs"`, `id="panel-details"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	// The CSP forbids inline script and style, so none may creep in.
+	for _, banned := range []string{"<script>", "<style", " style=", " onclick="} {
+		if strings.Contains(body, banned) {
+			t.Errorf("index.html contains %q, which the CSP blocks", banned)
 		}
 	}
 }

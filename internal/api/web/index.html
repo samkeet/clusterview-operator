@@ -34,5 +34,29 @@
       <p id="pods-empty" class="muted" hidden>No pods on this node.</p>
     </section>
   </main>
+
+  <!-- Pod drawer: an overlay, not modal, so the pod table stays usable behind it. -->
+  <aside id="drawer" class="drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" hidden>
+    <div class="d-head">
+      <h2 id="drawer-title" class="mono"></h2>
+      <button id="drawer-close" class="x" type="button" aria-label="Close pod details">×</button>
+    </div>
+    <div id="drawer-facts" class="facts"></div>
+    <div id="drawer-banner" class="banner" role="status" hidden></div>
+    <div id="drawer-tabs" class="tabs" role="tablist" aria-label="Pod views">
+      <button id="tab-events" class="tab" type="button" role="tab" aria-controls="panel-events" data-tab="events">Events</button>
+      <button id="tab-logs" class="tab" type="button" role="tab" aria-controls="panel-logs" data-tab="logs">Logs</button>
+      <button id="tab-details" class="tab" type="button" role="tab" aria-controls="panel-details" data-tab="details">Details</button>
+    </div>
+    <div class="d-body">
+      <div id="panel-events" class="panel" role="tabpanel" aria-labelledby="tab-events" data-tab="events" hidden></div>
+      <div id="panel-logs" class="panel" role="tabpanel" aria-labelledby="tab-logs" data-tab="logs" hidden>
+        <p class="muted pad">Pod logs will show here in a later release.</p>
+      </div>
+      <div id="panel-details" class="panel" role="tabpanel" aria-labelledby="tab-details" data-tab="details" hidden>
+        <dl id="details" class="details"></dl>
+      </div>
+    </div>
+  </aside>
 </body>
 </html>

@@ -4,6 +4,9 @@
 // build) every 5s with If-None-Match, and the selected node's pods while one is
 // selected. A 304 means "unchanged", so nothing is re-rendered. Data is only ever
 // inserted with textContent, never innerHTML, so names can't inject markup.
+//
+// Clicking a pod's name opens a drawer with Events / Logs / Details tabs. Only
+// the active tab polls (see TABS), so a tab that isn't shown costs nothing.
 "use strict";
 
 const POLL_MS = 5000;
@@ -16,6 +19,7 @@ const state = {
   error: null,         // message while the API is unreachable
   selected: null,      // selected node name
   pods: null,          // { etag, data, lastSeen, gone, error }
+  drawer: null,        // open pod drawer, see openDrawer
 };
 
 const $ = (id) => document.getElementById(id);
@@ -58,6 +62,26 @@ function gib(bytes) {
 
 function timeOf(d) {
   return d ? d.toLocaleTimeString() : "never";
+}
+
+// ago formats the time since d compactly: "40s", "3m", "2h", "5d".
+function ago(d) {
+  const s = Math.max(0, Math.round((Date.now() - d) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+function phaseClass(phase) {
+  if (phase === "Running" || phase === "Succeeded") return "chip ok";
+  if (phase === "Failed") return "chip bad";
+  if (phase === "Pending") return "chip warn";
+  return "chip";
+}
+
+function samePod(a, b) {
+  return a && b && a.namespace === b.namespace && a.name === b.name;
 }
 
 // ---- rendering ----
@@ -139,12 +163,151 @@ function renderPods() {
   body.replaceChildren();
   const pods = p.data ? p.data.pods : [];
   for (const pod of pods) {
-    const tr = el("tr");
-    tr.append(el("td", "", pod.namespace), el("td", "", pod.name), el("td", "", pod.phase || "-"));
+    const tr = el("tr", state.drawer && samePod(state.drawer, pod) ? "sel" : "");
+    const open = el("button", "pod-link", pod.name);
+    open.type = "button";
+    open.dataset.namespace = pod.namespace;
+    open.dataset.name = pod.name;
+    open.addEventListener("click", () => openDrawer(pod));
+    const nameCell = el("td");
+    nameCell.append(open);
+    tr.append(el("td", "", pod.namespace), nameCell, el("td", "", pod.phase || "-"));
     tr.append(el("td", "num" + (pod.restarts > 0 ? " restarts-high" : ""), String(pod.restarts)));
     body.append(tr);
   }
   $("pods-empty").hidden = !p.data || pods.length > 0;
+  syncDrawerPod();
+}
+
+// ---- pod drawer ----
+
+// TABS is the drawer's tab registry. render draws the panel from state; poll
+// (optional) refreshes it and runs on every tick while that tab is active.
+// Logs plug in here as the next feature.
+const TABS = {
+  events: { render: () => {}, poll: null },
+  logs: { render: () => {}, poll: null },
+  details: { render: renderDetails, poll: null },
+};
+const TAB_ORDER = ["events", "logs", "details"];
+
+function openDrawer(pod) {
+  if (state.drawer && samePod(state.drawer, pod)) {
+    $("drawer-close").focus();
+    return;
+  }
+  state.drawer = {
+    namespace: pod.namespace,
+    name: pod.name,
+    pod,             // latest PodInfo from the pods poll
+    gone: false,     // the pod left the node's pod list
+    tab: "events",
+  };
+  $("drawer").hidden = false;
+  renderDrawer();
+  renderPods(); // row highlight
+  $("drawer-close").focus();
+  pollDrawer();
+}
+
+// closeDrawer hides the drawer. With restoreFocus, focus goes back to the pod's
+// name button (found again, since polling rebuilds the table).
+function closeDrawer(restoreFocus) {
+  const d = state.drawer;
+  if (!d) return;
+  state.drawer = null;
+  $("drawer").hidden = true;
+  renderPods();
+  if (!restoreFocus) return;
+  for (const b of $("pods-body").querySelectorAll("button.pod-link")) {
+    if (b.dataset.namespace === d.namespace && b.dataset.name === d.name) {
+      b.focus();
+      return;
+    }
+  }
+}
+
+// syncDrawerPod refreshes the drawer header from the latest pods poll. The pod
+// is only marked gone when the list loaded fine and it isn't in it.
+function syncDrawerPod() {
+  const d = state.drawer;
+  const p = state.pods;
+  if (!d || !p || !p.data || p.error || p.gone) return;
+  const pod = p.data.pods.find((x) => samePod(x, d));
+  const gone = !pod;
+  if (gone === d.gone && (!pod || JSON.stringify(pod) === JSON.stringify(d.pod))) return;
+  d.gone = gone;
+  if (pod) d.pod = pod;
+  renderDrawerHeader();
+  if (d.tab === "details") renderDetails();
+}
+
+function renderDrawer() {
+  renderDrawerHeader();
+  renderTabs();
+  TABS[state.drawer.tab].render();
+}
+
+function renderDrawerHeader() {
+  const d = state.drawer;
+  const pod = d.pod;
+  $("drawer-title").textContent = d.name;
+  const facts = $("drawer-facts");
+  facts.replaceChildren(
+    el("span", "chip", d.namespace),
+    el("span", phaseClass(pod.phase), pod.phase || "No phase"),
+    el("span", pod.restarts > 0 ? "chip bad" : "chip", `${pod.restarts} restart${pod.restarts === 1 ? "" : "s"}`),
+  );
+  if (pod.nodeName) facts.append(el("span", "chip", pod.nodeName));
+  const banner = $("drawer-banner");
+  banner.textContent = d.gone ? "This pod no longer exists. Its events stay readable until they expire." : "";
+  banner.hidden = !d.gone;
+}
+
+// renderTabs applies the WAI-ARIA tabs pattern: one tab in the tab order
+// (roving tabindex), aria-selected on the active one, other panels hidden.
+function renderTabs() {
+  const active = state.drawer.tab;
+  for (const t of $("drawer-tabs").querySelectorAll("[role=tab]")) {
+    const on = t.dataset.tab === active;
+    t.setAttribute("aria-selected", String(on));
+    t.tabIndex = on ? 0 : -1;
+  }
+  for (const panel of document.querySelectorAll("#drawer [role=tabpanel]")) {
+    panel.hidden = panel.dataset.tab !== active;
+  }
+}
+
+function setTab(name) {
+  const d = state.drawer;
+  if (!d || d.tab === name) return;
+  d.tab = name;
+  renderTabs();
+  TABS[name].render();
+  pollDrawer();
+}
+
+function renderDetails() {
+  const d = state.drawer;
+  const pod = d.pod;
+  const created = pod.createdAt ? new Date(pod.createdAt) : null;
+  const rows = [
+    ["Namespace", d.namespace],
+    ["Name", d.name],
+    ["Node", pod.nodeName || "Not scheduled"],
+    ["Phase", pod.phase || "-"],
+    ["Restarts", String(pod.restarts)],
+    ["Created", created ? `${created.toLocaleString()} (${ago(created)} ago)` : "-"],
+  ];
+  const dl = $("details");
+  dl.replaceChildren();
+  for (const [k, v] of rows) dl.append(el("dt", "", k), el("dd", "", v));
+}
+
+async function pollDrawer() {
+  const d = state.drawer;
+  const poll = d && TABS[d.tab].poll;
+  if (poll) await poll();
 }
 
 function renderStatus() {
@@ -217,6 +380,7 @@ async function pollPods() {
 
 function selectNode(name) {
   if (state.selected === name) return;
+  closeDrawer(false);
   state.selected = name;
   state.pods = { etag: null, data: null, lastSeen: null, gone: false, error: null };
   renderNodes();
@@ -225,6 +389,7 @@ function selectNode(name) {
 }
 
 function closePods() {
+  closeDrawer(false);
   state.selected = null;
   state.pods = null;
   renderNodes();
@@ -244,6 +409,7 @@ async function tick() {
   clearTimeout(timer);
   await pollNodes();
   await pollPods();
+  await pollDrawer();
   running = false;
   // Hidden tabs stop polling; visibilitychange restarts it.
   if (!document.hidden) timer = setTimeout(tick, POLL_MS);
@@ -255,5 +421,26 @@ document.addEventListener("visibilitychange", () => {
 });
 
 $("pods-close").addEventListener("click", closePods);
+$("drawer-close").addEventListener("click", () => closeDrawer(true));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.drawer) {
+    e.preventDefault();
+    closeDrawer(true);
+  }
+});
+for (const t of $("drawer-tabs").querySelectorAll("[role=tab]")) {
+  t.addEventListener("click", () => setTab(t.dataset.tab));
+}
+// Arrow keys, Home and End move between tabs, as in the WAI-ARIA tabs pattern.
+$("drawer-tabs").addEventListener("keydown", (e) => {
+  if (!state.drawer) return;
+  const i = TAB_ORDER.indexOf(state.drawer.tab);
+  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TAB_ORDER.length - 1 }[e.key];
+  if (next === undefined) return;
+  e.preventDefault();
+  const name = TAB_ORDER[(next + TAB_ORDER.length) % TAB_ORDER.length];
+  setTab(name);
+  $("tab-" + name).focus();
+});
 setInterval(renderUpdated, 1000);
 tick();
