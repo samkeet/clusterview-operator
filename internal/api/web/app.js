@@ -7,9 +7,12 @@
 //
 // Clicking a pod's name opens a drawer with Events / Logs / Details tabs. Only
 // the active tab polls (see TABS), so a tab that isn't shown costs nothing.
+// Events: only page 1 refreshes. On an older page the list stays put, and page
+// 1 is still polled with its ETag so a "new events" note can appear.
 "use strict";
 
 const POLL_MS = 5000;
+const EVENTS_PAGE = 5;
 const PHASES = ["Running", "Pending", "Succeeded", "Failed", "Unknown"];
 
 const state = {
@@ -185,7 +188,7 @@ function renderPods() {
 // (optional) refreshes it and runs on every tick while that tab is active.
 // Logs plug in here as the next feature.
 const TABS = {
-  events: { render: () => {}, poll: null },
+  events: { render: renderEvents, poll: pollEvents },
   logs: { render: () => {}, poll: null },
   details: { render: renderDetails, poll: null },
 };
@@ -202,6 +205,15 @@ function openDrawer(pod) {
     pod,             // latest PodInfo from the pods poll
     gone: false,     // the pod left the node's pod list
     tab: "events",
+    ev: {
+      page: 0,           // 0-based page shown
+      data: null,        // response for the page shown
+      page1: null,       // { etag, data }: latest page 1, polled even when not shown
+      newEvents: false,  // page 1 changed while an older page was shown
+      expanded: new Set(), // event names whose message is expanded
+      loading: false,
+      error: null,
+    },
   };
   $("drawer").hidden = false;
   renderDrawer();
@@ -284,6 +296,7 @@ function setTab(name) {
   d.tab = name;
   renderTabs();
   TABS[name].render();
+  renderPager(); // the pager belongs to the Events tab only
   pollDrawer();
 }
 
@@ -302,6 +315,198 @@ function renderDetails() {
   const dl = $("details");
   dl.replaceChildren();
   for (const [k, v] of rows) dl.append(el("dt", "", k), el("dd", "", v));
+}
+
+// ---- events tab ----
+
+function eventsURL(d, offset) {
+  return `/api/v1/namespaces/${encodeURIComponent(d.namespace)}/pods/${encodeURIComponent(d.name)}` +
+    `/events?limit=${EVENTS_PAGE}&offset=${offset}`;
+}
+
+// pollEvents runs each tick while the Events tab is open. It always fetches
+// page 1 with page 1's ETag, so a 304 costs nothing and re-renders nothing. On
+// page 1 a 200 re-renders; on an older page it only raises the "new events" note.
+async function pollEvents() {
+  const d = state.drawer;
+  const ev = d.ev;
+  const before = ev.error;
+  let changed = false;
+  try {
+    const r = await fetchJSON(eventsURL(d, 0), ev.page1 && ev.page1.etag);
+    if (state.drawer !== d) return; // closed or another pod while in flight
+    ev.error = null;
+    if (r.status === 200) {
+      changed = true;
+      const hadPage1 = ev.page1 !== null;
+      ev.page1 = { etag: r.etag, data: r.body };
+      if (ev.page === 0) {
+        ev.data = r.body;
+        ev.newEvents = false;
+      } else if (hadPage1) {
+        ev.newEvents = true;
+      }
+    }
+  } catch (e) {
+    if (state.drawer !== d) return;
+    ev.error = e.message || "network error";
+  }
+  if ((changed || ev.error !== before) && d.tab === "events") renderEvents();
+}
+
+// goToPage shows a page. Page 1 comes from the polled copy when there is one;
+// an older page is fetched once and then left alone.
+async function goToPage(page) {
+  const d = state.drawer;
+  const ev = d.ev;
+  ev.page = page;
+  if (page === 0) {
+    ev.newEvents = false;
+    if (ev.page1) ev.data = ev.page1.data;
+    renderEvents();
+    await pollEvents();
+    return;
+  }
+  ev.loading = true;
+  renderEvents();
+  try {
+    const r = await fetchJSON(eventsURL(d, page * EVENTS_PAGE), null);
+    if (state.drawer !== d || ev.page !== page) return; // moved on meanwhile
+    ev.loading = false;
+    ev.error = null;
+    ev.data = r.body;
+    // The page emptied (events expired): go to the last page that has any.
+    if (r.body.events.length === 0 && r.body.total > 0) {
+      await goToPage(Math.ceil(r.body.total / EVENTS_PAGE) - 1);
+      return;
+    }
+  } catch (e) {
+    if (state.drawer !== d || ev.page !== page) return;
+    ev.loading = false;
+    ev.error = e.message || "network error";
+  }
+  renderEvents();
+}
+
+function renderEvents() {
+  const d = state.drawer;
+  const ev = d.ev;
+
+  $("events-note").hidden = !(ev.newEvents && ev.page > 0);
+  const banner = $("events-banner");
+  banner.textContent = ev.error ? `Couldn't load events: ${ev.error}. Retrying.` : "";
+  banner.hidden = !ev.error;
+
+  const list = $("events-list");
+  list.classList.toggle("stale", Boolean(ev.error || ev.loading));
+  list.replaceChildren();
+  const events = ev.data ? ev.data.events : [];
+  for (const e of events) list.append(eventRow(ev, e));
+  // Only messages that are actually clamped get to expand.
+  for (const msg of list.querySelectorAll(".ev-msg[aria-expanded=false]")) {
+    if (msg.scrollHeight <= msg.clientHeight + 1) {
+      msg.disabled = true;
+      msg.removeAttribute("aria-expanded");
+      msg.removeAttribute("title");
+    }
+  }
+  $("events-empty").hidden = !ev.data || ev.data.total > 0;
+  renderPager();
+}
+
+function eventRow(ev, e) {
+  const warn = e.type === "Warning";
+  const li = el("li", "ev" + (warn ? " w" : ""));
+  const top = el("div", "ev-top");
+  top.append(el("span", warn ? "chip bad" : "chip", e.type || "Unknown"));
+  top.append(el("b", "", e.reason || "-"));
+  if (e.count > 1) top.append(el("span", "muted", `×${e.count}`));
+  const seen = new Date(e.lastSeen);
+  const age = el("span", "age", `${ago(seen)} ago`);
+  age.dataset.ts = String(seen.getTime());
+  age.title = seen.toLocaleString();
+  top.append(age);
+  li.append(top);
+
+  const open = ev.expanded.has(e.name);
+  const msg = el("button", "ev-msg", e.message);
+  msg.type = "button";
+  msg.setAttribute("aria-expanded", String(open));
+  msg.title = "Click to expand";
+  msg.addEventListener("click", () => {
+    const now = !ev.expanded.has(e.name);
+    if (now) ev.expanded.add(e.name);
+    else ev.expanded.delete(e.name);
+    msg.setAttribute("aria-expanded", String(now));
+  });
+  li.append(msg);
+  return li;
+}
+
+// pageList returns the page numbers to show, with null for a gap, e.g.
+// [0, null, 4, 5, 6, null, 9]. Short lists are shown whole.
+function pageList(cur, pages) {
+  if (pages <= 7) return [...Array(pages).keys()];
+  const out = [0];
+  const lo = Math.max(1, cur - 2);
+  const hi = Math.min(pages - 2, cur + 2);
+  if (lo > 1) out.push(null);
+  for (let i = lo; i <= hi; i++) out.push(i);
+  if (hi < pages - 2) out.push(null);
+  out.push(pages - 1);
+  return out;
+}
+
+function renderPager() {
+  const d = state.drawer;
+  const ev = d.ev;
+  const pager = $("events-pager");
+  const total = ev.data ? ev.data.total : 0;
+  pager.hidden = d.tab !== "events" || total === 0;
+  // Rebuilding drops focus; put it back on the current page if it was here.
+  const hadFocus = pager.contains(document.activeElement);
+  pager.replaceChildren();
+  if (pager.hidden) return;
+
+  const pages = Math.max(1, Math.ceil(total / EVENTS_PAGE));
+  const first = ev.page * EVENTS_PAGE;
+  const range = el("span", "muted range",
+    `${Math.min(first + 1, total)}–${Math.min(first + EVENTS_PAGE, total)} of ${total}`);
+  pager.append(range);
+
+  const button = (text, label, page, disabled) => {
+    const b = el("button", "", text);
+    b.type = "button";
+    b.setAttribute("aria-label", label);
+    b.disabled = disabled;
+    b.addEventListener("click", () => goToPage(page));
+    return b;
+  };
+  pager.append(button("‹", "Previous page", ev.page - 1, ev.page === 0));
+  let current = null;
+  for (const i of pageList(ev.page, pages)) {
+    if (i === null) {
+      pager.append(el("span", "gap", "…"));
+      continue;
+    }
+    const b = button(String(i + 1), `Page ${i + 1}`, i, false);
+    if (i === ev.page) {
+      b.setAttribute("aria-current", "page");
+      current = b;
+    }
+    pager.append(b);
+  }
+  pager.append(button("›", "Next page", ev.page + 1, ev.page >= pages - 1));
+  if (hadFocus && current) current.focus();
+}
+
+// refreshAges keeps "40s ago" honest between re-renders, which only happen when
+// the data changes.
+function refreshAges() {
+  if (!state.drawer) return;
+  for (const age of $("events-list").querySelectorAll("[data-ts]")) {
+    age.textContent = `${ago(Number(age.dataset.ts))} ago`;
+  }
 }
 
 async function pollDrawer() {
@@ -442,5 +647,15 @@ $("drawer-tabs").addEventListener("keydown", (e) => {
   setTab(name);
   $("tab-" + name).focus();
 });
-setInterval(renderUpdated, 1000);
+$("events-note-go").addEventListener("click", () => {
+  if (!state.drawer) return;
+  goToPage(0);
+  // The note hides itself; keep focus in the drawer, on the page-1 button.
+  const cur = $("events-pager").querySelector("[aria-current=page]");
+  if (cur) cur.focus();
+});
+setInterval(() => {
+  renderUpdated();
+  refreshAges();
+}, 1000);
 tick();
