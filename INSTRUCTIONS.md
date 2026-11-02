@@ -7,10 +7,13 @@ your own cluster credentials. The `make` targets below do that for you.
 
 ```sh
 cp .env.example .env     # first time only, then fill in the placeholders
-make up                  # deploy everything and open the UI in your browser
+make ui                  # the operator is already running on the shared cluster: just open the UI
 ```
 
-Already deployed? `make ui` just opens the UI.
+On a fresh cluster, or if `kubectl -n clusterview-operator-system get pods`
+shows nothing, run `make up` first. It deploys everything and then opens the UI.
+**Nothing is built on your machine.** The operator image is already in GHCR,
+so you don't need podman or push access.
 
 There's no need to `source .env` first: `make up` and `make ui` load it
 themselves when `KUBECONFIG` isn't already set. An exported `KUBECONFIG` wins,
@@ -22,25 +25,32 @@ Claude Code settings. `.env.example` lists every key with placeholder values.
 
 ## What `make up` does
 
-One command brings up everything on the cluster `KUBECONFIG` points at, and is
-safe to re-run:
+One command brings up everything on the cluster `KUBECONFIG` points at. It's
+safe to re-run: on a cluster that's already up, it changes nothing.
 
-1. Builds and pushes the image for HEAD (linux/amd64).
-2. Ensures the `ghcr-pull` image pull secret.
-3. Deploys the operator (CRD, RBAC, NetworkPolicy, Deployment, UI Service).
-4. Applies the sample `ClusterView` and a 20-pod demo workload.
-5. Opens the UI, the same as `make ui`.
+1. Ensures the `ghcr-pull` image pull secret.
+2. Deploys the operator (CRD, RBAC, NetworkPolicy, Deployment, UI Service)
+   using the **pinned image** in `hack/IMAGE`
+   (`ghcr.io/samkeet/clusterview-operator:<sha>`). The cluster pulls it from
+   GHCR, and nothing is built.
+3. Applies the sample `ClusterView` and a 20-pod demo workload.
+4. Opens the UI, the same as `make ui`.
 
 ```sh
-make up SKIP_BUILD=1 IMG=<image>       # deploy an image that's already pushed
 make up NO_UI=1                        # deploy only, don't open the UI
+make up IMG=<image>                    # deploy another image that's already in GHCR
 ```
 
 `make up` reuses the `ghcr-pull` secret in `clusterview-operator-system` if it
 exists, creates it from `GHCR_PULL_TOKEN` (a `read:packages`-only PAT, see
 `.env.example`) if that's set, and otherwise stops and prints the command to
-create it. Building also needs podman and push access to
-`ghcr.io/samkeet/clusterview-operator`.
+create it. The GHCR package is private, so a fresh cluster always needs that
+secret.
+
+Maintainers publish a new image with `make release`. It builds and pushes the
+image for HEAD (podman, linux/amd64, push access to GHCR) and writes its tag
+to `hack/IMAGE`. Deploy it with `make up`, check it on the cluster, then commit
+`hack/IMAGE` in the release PR.
 
 ## What `make ui` does
 
@@ -108,6 +118,16 @@ running: `lsof -iTCP:8080 -sTCP:LISTEN`), use another local port such as
   marked, and clicking a long message expands it. Kubernetes keeps events for
   about an hour. **Esc** or **×** closes the drawer. Logs is a placeholder for
   now. Try `demo-batch/crashloop-…` to see Warning events.
+- **Node pools** (header nav, or `#/pools`): one section per node pool
+  (`s-4vcpu-8gb · 3 nodes · 39 pods · CPU req % · Mem req %`). Each node row
+  has two stacked bars, CPU and memory requests, where **each segment is one
+  pod's request as a share of the node's allocatable**, coloured by namespace
+  (`kube-system` grey). Hover a segment for the pod and its share. Click a
+  namespace in the legend to hide or show it. Click a node for a
+  `kubectl describe node`-style table: QoS, CPU and memory requests and
+  limits, each with % of allocatable. Percentages are truncated, like describe.
+  Pods with no requests are listed as "+N with no requests". An unset limit
+  shows `0`.
 
 If the port-forward drops, the page keeps showing the last data, dimmed, with
 a "Can't reach API" banner until `make ui` reconnects. If it stays on
@@ -127,6 +147,7 @@ curl -s localhost:8080/api/v1/summary
 curl -s localhost:8080/api/v1/nodes
 curl -s localhost:8080/api/v1/nodes/<node-name>/pods
 curl -s 'localhost:8080/api/v1/namespaces/<ns>/pods/<pod>/events?limit=5&offset=0'
+curl -s localhost:8080/api/v1/pools
 ```
 
 The API is read-only: it answers `GET` only, and every other method gets
