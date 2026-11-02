@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><title>Node pool view options</title><style>body{font:15px/1.5 system-ui;max-width:780px;margin:40px auto;padding:0 20px}li{margin:10px 0}</style>
+<h1>Node pool view: design options</h1><p>Which pods run in each node pool, their namespaces, and how much of each node's allocatable CPU and memory each pod requests (as in <code>kubectl describe node</code>).</p><p><b>Chosen:</b> <a href="option-b-capacity-map.html">B: Capacity map</a>, minimal scope. The other options are kept as a record.</p><ol>
+<li><a href="option-a-accordion.html"><b>A: Pool → node accordion</b></a>: totals at each level, with a describe-style pod table per node.</li>
+<li><a href="option-b-capacity-map.html"><b>B: Capacity map</b></a>: stacked per-pod segments coloured by namespace, so the big consumers stand out.</li>
+<li><a href="option-c-namespace-matrix.html"><b>C: Namespace × pool matrix</b></a>: which namespaces run where, and how much they take.</li></ol>

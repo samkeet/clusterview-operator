@@ -201,3 +201,21 @@ One block per decision: the options we considered, then what we picked and why. 
 ## Events response: whole-body ETag, `name` per event, page-1 polling for "new events"
 - Considered: ETag on events only · whole body; detect new events by `total` · by page 1's ETag
 - Chose the whole-body ETag ("1–5 of N" changing is a real change) and a stable `name` per event, so expanded rows survive re-renders. On older pages the UI still polls page 1 with its ETag, which also catches ×count bumps that `total` misses. Polling runs only while the drawer is open on the Events tab.
+
+## Node pool view: capacity map (B), minimal scope
+- Considered (mockups in `docs/design/pools/`): A pool → node accordion · B capacity map with one stacked segment per pod, coloured by namespace · C namespace × pool matrix
+- Chose B: it answers "which pods are using up this node, and from which namespace" at a glance, with a namespace legend filter and a click-through `kubectl describe`-style pod table. A shows totals but hides who uses them. C is a separate question we don't need yet.
+- In scope: a `#/pools` page with Nodes | Node pools nav, and one `GET /api/v1/pools` endpoint (pools → nodes → pods with namespace, name, CPU/memory requests and limits, QoS) with an ETag. The node table reads from the same response.
+- Out of scope for now: actual usage, a configurable pool label, the namespace matrix, sorting, deep links.
+
+## Capacity numbers: requests and limits as % of allocatable, like kubectl describe
+- Considered: requests/limits from pod specs · real usage from metrics-server
+- Chose requests/limits: metrics-server isn't installed, and they need no new permissions or components. Effective pod requests are computed like kubectl (init/sidecar containers, overhead, pod-level resources) with `k8s.io/component-helpers/resource`. Only non-terminated pods count. Limits above 100% are flagged as overcommitted.
+
+## Pool grouping: hardcoded DOKS label, "unpooled" fallback
+- Considered: hardcode `doks.digitalocean.com/node-pool` · a `--nodepool-label` flag · try a list of known cloud labels
+- Chose hardcoded, to keep scope minimal: this cluster is DOKS. Nodes without the label show as "unpooled" rather than disappearing. A flag is a small change if another provider is ever needed.
+
+## `/api/v1/pools` payload: every pod, minimal fields
+- Considered: per-pod data loaded per node (like the Nodes page) · everything in one response
+- Chose one response: the capacity map draws every node's per-pod segments at once. Each pod carries only 7 small fields and the poll is ETag'd, so it costs a few hundred bytes per pod only when something changes. Tradeoff: payload grows with the pod count. If that becomes a problem, segments under ~1% can be folded into "other".
