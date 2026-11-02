@@ -1,11 +1,14 @@
 package clusterstate
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	observev1alpha1 "github.com/samkeet/clusterview-operator/api/v1alpha1"
 )
 
 const (
@@ -228,5 +231,166 @@ func TestTerminated(t *testing.T) {
 		if got := Terminated(&p); got != want {
 			t.Errorf("Terminated(%q) = %v, want %v", phase, got, want)
 		}
+	}
+}
+
+func poolNode(name, pool, instanceType string) corev1.Node {
+	n := node(name, status(corev1.ConditionTrue))
+	n.Labels = map[string]string{}
+	if pool != "-" {
+		n.Labels[NodePoolLabel] = pool
+	}
+	if instanceType != "" {
+		n.Labels[corev1.LabelInstanceTypeStable] = instanceType
+	}
+	n.Status.Allocatable = rl("3890m", "6568224Ki")
+	return n
+}
+
+func boundPod(ns, name, nodeName string, phase corev1.PodPhase, req, lim corev1.ResourceList) corev1.Pod {
+	p := pod(ns, name, nodeName, phase)
+	p.Spec.Containers = []corev1.Container{ctr("c", req, lim)}
+	return p
+}
+
+// TestBuildPoolsMatchesDescribe rebuilds node pool-qhbs5hlue-3efzx4 from the live
+// cluster. kubectl describe node prints "Allocated resources": cpu 612m (15%) /
+// 1 (25%), memory 752Mi (11%) / 1664Mi (25%).
+func TestBuildPoolsMatchesDescribe(t *testing.T) {
+	n := poolNode("pool-qhbs5hlue-3efzx4", "pool-qhbs5hlue", "s-4vcpu-8gb")
+	pods := []corev1.Pod{
+		ciliumPod(),
+		boundPod(nsSystem, "coredns-6b4b4b84d8-lkf46", "", corev1.PodRunning, rl("100m", "170Mi"), rl("", "170Mi")),
+		boundPod(nsSystem, "coredns-6b4b4b84d8-wgmlq", "", corev1.PodRunning, rl("100m", "170Mi"), rl("", "170Mi")),
+		boundPod(nsSystem, "do-node-agent-f8lcw", "", corev1.PodRunning, rl("102m", "80Mi"), rl("", "300Mi")),
+	}
+	for _, name := range []string{"csi-do-node-kq6zg", "doks-telemetry-config-reloader-s6p9z", "hubble-relay-6fd68c8df5-6qjp7",
+		"hubble-ui-7857984d59-7jv45", "konnectivity-agent-8d54854f-pvxgc", "konnectivity-agent-8d54854f-x52f4"} {
+		pods = append(pods, boundPod(nsSystem, name, "", corev1.PodRunning, nil, nil))
+	}
+	for i := range pods {
+		pods[i].Spec.NodeName = n.Name
+	}
+
+	snap := BuildPools([]corev1.Node{n}, pods, nil)
+	if len(snap.Pools) != 1 || len(snap.Pools[0].Nodes) != 1 {
+		t.Fatalf("got %+v, want one pool with one node", snap)
+	}
+	got := snap.Pools[0].Nodes[0]
+	want := CapacityTotals{CPURequestMilli: 612, CPULimitMilli: 1000, MemRequestBytes: 752 * mi, MemLimitBytes: 1664 * mi}
+	if got.Totals != want {
+		t.Errorf("totals = %+v, want %+v", got.Totals, want)
+	}
+	if got.Allocatable != (Allocatable{CPUMilli: 3890, MemoryBytes: 6568224 << 10}) {
+		t.Errorf("allocatable = %+v", got.Allocatable)
+	}
+	if len(got.Pods) != 10 {
+		t.Errorf("pods = %d, want 10", len(got.Pods))
+	}
+	// describe's truncated percentages, computed the way the UI does.
+	pct := func(v, total int64) int64 { return int64(float64(v) / float64(total) * 100) }
+	for _, c := range []struct{ got, want int64 }{
+		{pct(got.Totals.CPURequestMilli, got.Allocatable.CPUMilli), 15},
+		{pct(got.Totals.CPULimitMilli, got.Allocatable.CPUMilli), 25},
+		{pct(got.Totals.MemRequestBytes, got.Allocatable.MemoryBytes), 11},
+		{pct(got.Totals.MemLimitBytes, got.Allocatable.MemoryBytes), 25},
+		{pct(310, got.Allocatable.CPUMilli), 7}, // cilium: 7.97% prints as 7%
+	} {
+		if c.got != c.want {
+			t.Errorf("percent = %d, want %d", c.got, c.want)
+		}
+	}
+	if snap.Filtered {
+		t.Error("Filtered = true with no namespace filter")
+	}
+}
+
+func TestBuildPoolsGrouping(t *testing.T) {
+	cordoned := poolNode("b-2", "pool-b", "s-8vcpu-16gb")
+	cordoned.Spec.Unschedulable = true
+	cordoned.Status.Conditions[0].Status = corev1.ConditionFalse
+	noAlloc := poolNode("solo", "-", "")
+	noAlloc.Status.Allocatable = nil
+	noAlloc.Status.Capacity = rl("2", "4Gi")
+	nodes := []corev1.Node{
+		cordoned,
+		poolNode("a-1", "pool-a", "s-4vcpu-8gb"),
+		poolNode("b-1", "pool-b", "s-8vcpu-16gb"),
+		noAlloc,
+		poolNode("empty-label", "", "s-4vcpu-8gb"),
+		poolNode("a-2", "pool-a", "s-2vcpu-4gb"),
+	}
+	r := rl("100m", "100Mi")
+	pods := []corev1.Pod{
+		boundPod("shop", "web-1", "a-1", corev1.PodRunning, r, nil),
+		boundPod("batch", "job-1", "a-1", corev1.PodPending, r, nil),
+		boundPod("batch", "done", "a-1", corev1.PodSucceeded, r, nil),
+		boundPod("batch", "crashed", "a-1", corev1.PodFailed, r, nil),
+		boundPod("shop", "unscheduled", "", corev1.PodPending, r, nil),
+		boundPod("shop", "orphan", "deleted-node", corev1.PodRunning, r, nil),
+		boundPod("hidden", "secret", "a-1", corev1.PodRunning, r, nil),
+		boundPod("shop", "web-0", "a-1", corev1.PodRunning, r, nil),
+	}
+
+	snap := BuildPools(nodes, pods, []string{"shop", "batch"})
+
+	if !snap.Filtered {
+		t.Error("Filtered = false with a namespace filter")
+	}
+	type poolWant struct {
+		name, instanceType string
+		nodes              []string
+	}
+	wantPools := []poolWant{
+		{"pool-a", "", []string{"a-1", "a-2"}}, // mixed instance types: left out
+		{"pool-b", "s-8vcpu-16gb", []string{"b-1", "b-2"}},
+		{UnpooledPool, "", []string{"empty-label", "solo"}}, // last, despite sorting before letters
+	}
+	if len(snap.Pools) != len(wantPools) {
+		t.Fatalf("pools = %+v, want %d", snap.Pools, len(wantPools))
+	}
+	for i, w := range wantPools {
+		p := snap.Pools[i]
+		var names []string
+		for _, n := range p.Nodes {
+			names = append(names, n.Name)
+		}
+		if p.Name != w.name || p.InstanceType != w.instanceType || int(p.NodeCount) != len(w.nodes) ||
+			strings.Join(names, ",") != strings.Join(w.nodes, ",") {
+			t.Errorf("pool %d = %s %q %d %v, want %+v", i, p.Name, p.InstanceType, p.NodeCount, names, w)
+		}
+	}
+
+	a1 := snap.Pools[0].Nodes[0]
+	var podNames []string
+	for _, p := range a1.Pods {
+		podNames = append(podNames, p.Namespace+"/"+p.Name)
+	}
+	// Non-terminated, in the filter, sorted by namespace then name.
+	if got, want := strings.Join(podNames, ","), "batch/job-1,shop/web-0,shop/web-1"; got != want {
+		t.Errorf("a-1 pods = %s, want %s", got, want)
+	}
+	if a1.Totals != (CapacityTotals{CPURequestMilli: 300, MemRequestBytes: 300 * mi}) {
+		t.Errorf("a-1 totals = %+v", a1.Totals)
+	}
+
+	b2 := snap.Pools[1].Nodes[1]
+	if b2.Schedulable || b2.Status != observev1alpha1.NodeNotReady {
+		t.Errorf("b-2 = schedulable %v status %s, want cordoned and NotReady", b2.Schedulable, b2.Status)
+	}
+	if b2.Pods == nil {
+		t.Error("b-2 pods = nil, want an empty list")
+	}
+
+	solo := snap.Pools[2].Nodes[1]
+	if solo.Allocatable != (Allocatable{CPUMilli: 2000, MemoryBytes: 4 * gi}) {
+		t.Errorf("solo allocatable = %+v, want capacity as the fallback", solo.Allocatable)
+	}
+}
+
+func TestBuildPoolsEmpty(t *testing.T) {
+	snap := BuildPools(nil, nil, nil)
+	if snap.Pools == nil || len(snap.Pools) != 0 {
+		t.Errorf("pools = %#v, want an empty, non-nil list", snap.Pools)
 	}
 }
