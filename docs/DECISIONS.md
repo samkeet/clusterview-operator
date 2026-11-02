@@ -185,3 +185,19 @@ One block per decision: the options we considered, then what we picked and why. 
 ## Events source: cached informer indexed by involved object
 - Considered: query the API server on each click · informer cache of `events.k8s.io/v1` Events with an index on the object each event is about
 - Chose the cache: it keeps the "no API server calls per request" rule, and the index makes a lookup touch only that pod's events. The cost is cluster-wide list/watch on events and memory bounded by the event TTL. A transform drops managedFields. The controller doesn't watch events, because they don't affect CR status. Event messages are returned in full for now and reviewed in the security pass before going public.
+
+## Event time and count: fallback chains that match kubectl
+- Considered: `eventTime` only · `series.lastObservedTime` only · a fallback chain
+- Chose fallbacks: lastSeen = first non-zero of `series.lastObservedTime` → `deprecatedLastTimestamp` → `eventTime` → `deprecatedFirstTimestamp` → creation time. count = `series.count` → `deprecatedCount` → 1. On k8s 1.37 the kubelet still uses the old recorder (all 43 of its events had no `eventTime`), so `eventTime` alone would leave most pod events without a time. New-API repeats can show one fewer than the true count; we match kubectl rather than guess.
+
+## Pod events lookup: kind/ns/name index, UID filter, deleted pods allowed
+- Considered: 404 if the pod isn't cached · always return events; key `ns/name` · `kind/ns/name`
+- Chose `kind/ns/name` (ready for node events) and no pod-existence requirement: events outlive deleted pods, which is exactly when you want them. When the pod is cached, only events with its UID are kept, so an earlier pod with the same name (StatefulSet `web-0`) doesn't leak in. Unknown pod → 200 with `total: 0`. A namespace outside the filter → 404; that only reveals config, not pod data.
+
+## Events cache: pod events only, 1 KiB message cap, memory measured later
+- Considered: cache all events · field selector `regarding.kind=Pod` · scope by namespace filter; raise the memory limit now or after measuring
+- Chose `regarding.kind=Pod` with a transform that drops managedFields, annotations and unused fields, and caps messages at 1 KiB (shown with "…"). That's 37% fewer events on this cluster, and node events later need a one-line cache change. The namespace filter is dynamic and per-CR, so it's applied when a request is read, not in the cache. The 256Mi limit stays until we measure (see issue #23 on GOMEMLIMIT).
+
+## Events response: whole-body ETag, `name` per event, page-1 polling for "new events"
+- Considered: ETag on events only · whole body; detect new events by `total` · by page 1's ETag
+- Chose the whole-body ETag ("1–5 of N" changing is a real change) and a stable `name` per event, so expanded rows survive re-renders. On older pages the UI still polls page 1 with its ETag, which also catches ×count bumps that `total` misses. Polling runs only while the drawer is open on the Events tab.
