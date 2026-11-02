@@ -299,6 +299,8 @@ func TestRBACLeastPrivilege(t *testing.T) {
 		"list clusterviews.observe.samkeet.org",
 		"watch clusterviews.observe.samkeet.org",
 		"patch clusterviews.observe.samkeet.org/status",
+		// Cached for the API's pod events drawer.
+		"list events.events.k8s.io", "watch events.events.k8s.io",
 		"get leases.coordination.k8s.io " + operatorNS,
 		"create leases.coordination.k8s.io " + operatorNS,
 		"update leases.coordination.k8s.io " + operatorNS,
@@ -317,6 +319,9 @@ func TestRBACLeastPrivilege(t *testing.T) {
 		"delete leases.coordination.k8s.io " + operatorNS,
 		"create leases.coordination.k8s.io default",
 		"create events default",
+		"get events.events.k8s.io default",
+		"create events.events.k8s.io default",
+		"delete events.events.k8s.io default",
 	}
 	for _, a := range allowed {
 		g.Expect(canI(g, a)).To(BeTrue(), "operator should be allowed to %q", a)
