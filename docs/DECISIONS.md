@@ -30,9 +30,9 @@ One block per decision: the options we considered, then what we picked and why. 
 - Considered: push to main · squash-merge PRs · merge-commit PRs
 - Chose merge commits: CLAUDE.md requires PRs and forbids squashing, so small commits keep their history. Deploying the branch before merging means main is always something that ran on the cluster.
 
-## UI exposure: port-forward first, public LoadBalancer later
-- Considered: public LoadBalancer now · ClusterIP + `kubectl port-forward` · Ingress
-- Chose port-forward first: the API has no auth, so we test locally before exposing cluster data publicly. The LoadBalancer comes once things have been checked.
+## UI exposure: port-forward only (final)
+- Considered: public LoadBalancer · ClusterIP + `kubectl port-forward` · Ingress · Cloudflare Tunnel + Access
+- Chose port-forward only: the API has no auth of its own, so port-forward makes access ride on cluster credentials and RBAC (`create pods/portforward`), and nothing is exposed to the internet. That removes the LoadBalancer, the NodePort-bypass risk and TLS/auth work. TASK.md accepts "port-forward instructions"; they're in `INSTRUCTIONS.md`. Started as "port-forward first, LoadBalancer later"; the user decided against public exposure.
 
 ## `refreshInterval` semantics: minimum time between status writes
 - Considered: poll the API server every N · write on every relevant event · fixed timer only · event-driven reconcile with a write throttle
