@@ -15,6 +15,15 @@ import (
 	"github.com/samkeet/clusterview-operator/internal/clusterstate"
 )
 
+// Shared test strings (goconst).
+const (
+	caseStripped    = "already stripped"
+	casePassThrough = "non-object passes through"
+	managerKubelet  = "kubelet"
+	nodeName1       = "node-1"
+	tombstone       = "tombstone"
+)
+
 func fullContainer(name string) corev1.Container {
 	return corev1.Container{
 		Name:          name,
@@ -68,7 +77,7 @@ func fullNode() *corev1.Node {
 			Name:          "n1",
 			Labels:        map[string]string{corev1.LabelInstanceTypeStable: "s-4vcpu-8gb"},
 			Annotations:   map[string]string{"a": "b"},
-			ManagedFields: []metav1.ManagedFieldsEntry{{Manager: "kubelet"}},
+			ManagedFields: []metav1.ManagedFieldsEntry{{Manager: managerKubelet}},
 		},
 		Spec: corev1.NodeSpec{Unschedulable: true},
 		Status: corev1.NodeStatus{
@@ -102,7 +111,7 @@ func TestStripPod(t *testing.T) {
 	}{
 		{name: "full pod", in: fullPod(), want: strippedPod()},
 		// A second pass must change nothing: informers can re-run the transform.
-		{name: "already stripped", in: strippedPod(), want: strippedPod()},
+		{name: caseStripped, in: strippedPod(), want: strippedPod()},
 		{
 			name: "metadata-only pod",
 			in: &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
@@ -111,7 +120,7 @@ func TestStripPod(t *testing.T) {
 			}},
 			want: &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "p"}},
 		},
-		{name: "non-object passes through", in: "tombstone", want: "tombstone"},
+		{name: casePassThrough, in: tombstone, want: tombstone},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -139,8 +148,8 @@ func TestStripNode(t *testing.T) {
 		want any
 	}{
 		{name: "full node", in: fullNode(), want: strippedNode()},
-		{name: "already stripped", in: strippedNode(), want: strippedNode()},
-		{name: "non-object passes through", in: 7, want: 7},
+		{name: caseStripped, in: strippedNode(), want: strippedNode()},
+		{name: casePassThrough, in: 7, want: 7},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -204,22 +213,22 @@ func fullEvent() *eventsv1.Event {
 			Name:              "p.18e4",
 			CreationTimestamp: created,
 			Annotations:       map[string]string{"a": "b"},
-			ManagedFields:     []metav1.ManagedFieldsEntry{{Manager: "kubelet"}},
+			ManagedFields:     []metav1.ManagedFieldsEntry{{Manager: managerKubelet}},
 		},
 		EventTime:           metav1.NewMicroTime(created.Time),
 		Series:              &eventsv1.EventSeries{Count: 3, LastObservedTime: metav1.NewMicroTime(created.Add(time.Minute))},
-		ReportingController: "kubelet",
-		ReportingInstance:   "node-1",
+		ReportingController: managerKubelet,
+		ReportingInstance:   nodeName1,
 		Action:              "Pulling",
 		Reason:              "Pulling",
 		Note:                "Pulling image",
 		Type:                corev1.EventTypeNormal,
 		Regarding: corev1.ObjectReference{
-			APIVersion: "v1", Kind: "Pod", Namespace: "ns", Name: "p", UID: "uid-1",
+			APIVersion: "v1", Kind: kindPod, Namespace: "ns", Name: "p", UID: "uid-1",
 			ResourceVersion: "42", FieldPath: "spec.containers{app}",
 		},
-		Related:                  &corev1.ObjectReference{Kind: "Node", Name: "node-1"},
-		DeprecatedSource:         corev1.EventSource{Component: "kubelet", Host: "node-1"},
+		Related:                  &corev1.ObjectReference{Kind: "Node", Name: nodeName1},
+		DeprecatedSource:         corev1.EventSource{Component: managerKubelet, Host: nodeName1},
 		DeprecatedFirstTimestamp: created,
 		DeprecatedLastTimestamp:  created,
 		DeprecatedCount:          3,
@@ -245,8 +254,8 @@ func TestStripEvent(t *testing.T) {
 		want any
 	}{
 		{name: "full event", in: fullEvent(), want: strippedEvent()},
-		{name: "already stripped", in: strippedEvent(), want: strippedEvent()},
-		{name: "non-object passes through", in: "tombstone", want: "tombstone"},
+		{name: caseStripped, in: strippedEvent(), want: strippedEvent()},
+		{name: casePassThrough, in: tombstone, want: tombstone},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -312,9 +321,9 @@ func TestEventRegarding(t *testing.T) {
 		ref  corev1.ObjectReference
 		want []string
 	}{
-		{name: "pod", ref: corev1.ObjectReference{Kind: "Pod", Namespace: "ns", Name: "p"}, want: []string{"Pod/ns/p"}},
+		{name: "pod", ref: corev1.ObjectReference{Kind: kindPod, Namespace: "ns", Name: "p"}, want: []string{"Pod/ns/p"}},
 		{name: "cluster-scoped", ref: corev1.ObjectReference{Kind: "Node", Name: "n1"}, want: []string{"Node//n1"}},
-		{name: "no name is not indexed", ref: corev1.ObjectReference{Kind: "Pod", Namespace: "ns"}, want: nil},
+		{name: "no name is not indexed", ref: corev1.ObjectReference{Kind: kindPod, Namespace: "ns"}, want: nil},
 		{name: "no kind is not indexed", ref: corev1.ObjectReference{Namespace: "ns", Name: "p"}, want: nil},
 	}
 	for _, tt := range tests {
@@ -328,7 +337,7 @@ func TestEventRegarding(t *testing.T) {
 	if got := EventRegarding(&corev1.Pod{}); got != nil {
 		t.Errorf("EventRegarding(non-event) = %v, want nil", got)
 	}
-	if got, want := RegardingKey("Pod", "ns", "p"), "Pod/ns/p"; got != want {
+	if got, want := RegardingKey(kindPod, "ns", "p"), "Pod/ns/p"; got != want {
 		t.Errorf("RegardingKey = %q, want %q", got, want)
 	}
 }

@@ -30,7 +30,7 @@ func at(m int) metav1.Time { return metav1.NewTime(t0.Add(time.Duration(m) * tim
 func legacyEvent(ns, pod, name string, uid types.UID, lastMin int, count int32) *eventsv1.Event {
 	return &eventsv1.Event{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, CreationTimestamp: at(lastMin)},
-		Regarding:  corev1.ObjectReference{Kind: "Pod", Namespace: ns, Name: pod, UID: uid},
+		Regarding:  corev1.ObjectReference{Kind: kindPod, Namespace: ns, Name: pod, UID: uid},
 		Type:       corev1.EventTypeNormal, Reason: "R-" + name, Note: "note " + name,
 		DeprecatedFirstTimestamp: at(lastMin), DeprecatedLastTimestamp: at(lastMin),
 		DeprecatedCount: count,

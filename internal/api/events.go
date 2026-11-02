@@ -26,6 +26,10 @@ import (
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=list;watch
 
 const (
+	// kindPod is the regarding.kind of pod events, in the index key and the
+	// cache's field selector.
+	kindPod = "Pod"
+
 	defaultEventLimit = 5
 	maxEventLimit     = 50
 )
@@ -92,7 +96,7 @@ func (s *Server) eventsForPod(ctx context.Context, ns, name string) ([]eventsv1.
 	var list eventsv1.EventList
 	// Read-only use, so skip deep-copying cached objects.
 	if err := s.Reader.List(ctx, &list, client.InNamespace(ns), client.UnsafeDisableDeepCopy,
-		client.MatchingFields{EventRegardingField: RegardingKey("Pod", ns, name)}); err != nil {
+		client.MatchingFields{EventRegardingField: RegardingKey(kindPod, ns, name)}); err != nil {
 		return nil, fmt.Errorf("listing events for pod %s/%s: %w", ns, name, err)
 	}
 	// The slice is ours (only its elements share memory with the cache), so
