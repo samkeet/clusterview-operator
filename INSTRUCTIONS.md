@@ -1,57 +1,63 @@
 # Reaching the ClusterView UI
 
 The UI is not exposed publicly. You reach it with `kubectl port-forward`, using
-your own cluster credentials.
+your own cluster credentials. The `make` targets below do that for you.
 
-## Before you start
-
-- Load the environment from the repo root, so `kubectl` (and Claude Code, if
-  you use it) gets the cluster credentials and kubeconfig path:
-
-  ```sh
-  cp .env.example .env    # first time only, then fill in the placeholders
-  source .env && claude   # or just `source .env` if you're not using Claude Code
-  ```
-
-  `.env` exports `KUBECONFIG` (the cluster's kubeconfig under `.kube/`) and
-  the Claude Code settings: the OpenRouter API key, base URL, model overrides
-  and config dir. `.env.example` lists every key with placeholder values.
-  `.env` itself is gitignored, so never commit it or paste its contents
-  anywhere. Check you're on the right cluster with
-  `kubectl config current-context`.
-
-- Your user needs `get services`, `get pods` and `create pods/portforward` in
-  the `clusterview-operator-system` namespace. Check with:
-
-  ```sh
-  kubectl auth can-i create pods/portforward -n clusterview-operator-system
-  ```
-
-- The cluster must be running the operator. Check that the pod is `Running` and
-  `1/1` ready:
-
-  ```sh
-  kubectl -n clusterview-operator-system get pods
-  ```
-
-## Spin up the whole project
-
-One command brings up everything on the cluster `KUBECONFIG` points at: the
-operator (CRD, RBAC, NetworkPolicy, Deployment, UI Service), the sample
-`ClusterView` and a 20-pod demo workload. It's safe to re-run.
+## Quick start
 
 ```sh
-source .env
-make up                                # build + push the image for HEAD, then deploy
-make up SKIP_BUILD=1 IMG=<image>       # or deploy an image that's already pushed
-make ui                                # port-forward, then open http://localhost:8080
+cp .env.example .env     # first time only, then fill in the placeholders
+make up                  # deploy everything and open the UI in your browser
 ```
 
-`make up` needs the `ghcr-pull` image pull secret in
-`clusterview-operator-system`. It reuses the secret if it exists, creates it
-from `GHCR_PULL_TOKEN` (a `read:packages`-only PAT, see `.env.example`) if
-that's set, and otherwise stops and prints the command to create it. Building
-also needs podman and push access to `ghcr.io/samkeet/clusterview-operator`.
+Already deployed? `make ui` just opens the UI.
+
+There's no need to `source .env` first: `make up` and `make ui` load it
+themselves when `KUBECONFIG` isn't already set. An exported `KUBECONFIG` wins,
+so you can still point them at another cluster.
+
+`.env` holds `KUBECONFIG` (the cluster's kubeconfig under `.kube/`) and the
+Claude Code settings. `.env.example` lists every key with placeholder values.
+`.env` is gitignored, so never commit it or paste its contents anywhere.
+
+## What `make up` does
+
+One command brings up everything on the cluster `KUBECONFIG` points at, and is
+safe to re-run:
+
+1. Builds and pushes the image for HEAD (linux/amd64).
+2. Ensures the `ghcr-pull` image pull secret.
+3. Deploys the operator (CRD, RBAC, NetworkPolicy, Deployment, UI Service).
+4. Applies the sample `ClusterView` and a 20-pod demo workload.
+5. Opens the UI, the same as `make ui`.
+
+```sh
+make up SKIP_BUILD=1 IMG=<image>       # deploy an image that's already pushed
+make up NO_UI=1                        # deploy only, don't open the UI
+```
+
+`make up` reuses the `ghcr-pull` secret in `clusterview-operator-system` if it
+exists, creates it from `GHCR_PULL_TOKEN` (a `read:packages`-only PAT, see
+`.env.example`) if that's set, and otherwise stops and prints the command to
+create it. Building also needs podman and push access to
+`ghcr.io/samkeet/clusterview-operator`.
+
+## What `make ui` does
+
+1. Checks your kubectl context, that you may port-forward in
+   `clusterview-operator-system`, and that the operator is ready.
+2. Port-forwards `svc/clusterview-operator-ui` to 8080, or a random free port
+   if 8080 is taken, and opens it in your browser. The URL is printed too.
+3. Keeps running and reconnects if the forward drops (e.g. after a redeploy).
+   **Ctrl-C** stops it.
+
+```sh
+make ui PORT=9090        # prefer another local port
+make ui NO_BROWSER=1     # print the URL only
+```
+
+Your user needs `get services`, `get pods` and `create pods/portforward` in
+`clusterview-operator-system`; `make ui` tells you if that's missing.
 
 Other targets:
 
@@ -70,26 +76,20 @@ The demo workload (`config/demo/`) stays running for demos. It puts 20 pods in
 
 Together they request about 1.2 CPU cores and 1.5Gi of memory.
 
-## Open the UI
+## Without make
+
+`make ui` wraps a plain port-forward. To run it by hand:
 
 ```sh
+source .env
 kubectl -n clusterview-operator-system port-forward svc/clusterview-operator-ui 8080:80
 ```
 
-Leave that running, then open <http://localhost:8080>.
-
-The Service is named `clusterview-operator-ui`, not `ui`: kustomize adds the
-`clusterview-operator-` prefix to every resource.
-
-### If port 8080 is already in use
-
-Pick another local port, for example 9090:
-
-```sh
-kubectl -n clusterview-operator-system port-forward svc/clusterview-operator-ui 9090:80
-```
-
-Then open <http://localhost:9090>.
+Then open <http://localhost:8080>. The Service is named
+`clusterview-operator-ui`, not `ui`: kustomize adds the `clusterview-operator-`
+prefix to every resource. If 8080 is taken (often by a port-forward you left
+running: `lsof -iTCP:8080 -sTCP:LISTEN`), use another local port such as
+`9090:80`.
 
 ## What you should see
 
@@ -109,11 +109,10 @@ Then open <http://localhost:9090>.
   about an hour. **Esc** or **×** closes the drawer. Logs is a placeholder for
   now. Try `demo-batch/crashloop-…` to see Warning events.
 
-The terminal running `port-forward` prints `Handling connection for 8080` for
-each request. If the port-forward drops, the page keeps showing the last data,
-dimmed, with a "Can't reach API" banner. If it stays on "Loading…" or the
-port-forward exits, check that the operator pod is running (see above) and
-restart the port-forward.
+If the port-forward drops, the page keeps showing the last data, dimmed, with
+a "Can't reach API" banner until `make ui` reconnects. If it stays on
+"Loading…", check the operator pod with
+`kubectl -n clusterview-operator-system get pods`.
 
 The same summary is on the `ClusterView` resource itself:
 

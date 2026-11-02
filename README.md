@@ -22,19 +22,18 @@ internet.
 
 ```sh
 cp .env.example .env     # first time: fill in KUBECONFIG and credentials
-source .env
-make up                  # image, operator, sample ClusterView, 20 demo pods
-make ui                  # then open http://localhost:8080
+make up                  # image, operator, sample ClusterView, 20 demo pods, then opens the UI
 ```
 
-`make up` is safe to re-run. Use `make up SKIP_BUILD=1 IMG=<image>` to deploy an
-image that's already pushed. [INSTRUCTIONS.md](INSTRUCTIONS.md) has the full
+`make up` loads `.env` itself and is safe to re-run. Use
+`make up SKIP_BUILD=1 IMG=<image>` to deploy an image that's already pushed, and
+`make ui` to reopen the UI later. [INSTRUCTIONS.md](INSTRUCTIONS.md) has the full
 walkthrough, prerequisites, what you should see, and troubleshooting.
 
 | Command | What it does |
 |---|---|
-| `make up` | Build and push the image (linux/amd64), ensure the pull secret, deploy, apply the sample `ClusterView` and the demo workload |
-| `make ui` | Port-forward the UI to `localhost:8080` |
+| `make up` | Build and push the image (linux/amd64), ensure the pull secret, deploy, apply the sample `ClusterView` and the demo workload, then run `make ui` |
+| `make ui` | Port-forward the UI (8080, or a random free port if that's taken), open the browser, reconnect if the forward drops |
 | `make demo` / `make demo-down` | Apply or delete only the 20-pod demo workload (`config/demo/`) |
 | `make down` | Remove the demo, the sample and the operator. This also deletes the `ghcr-pull` secret |
 | `make test` / `make lint` | Unit + envtest suites / golangci-lint |
@@ -122,7 +121,7 @@ Every decision, with the options considered and why each was chosen, is in
 | `internal/api/` | HTTP server, handlers, cache index and transforms, embedded UI (`web/`) |
 | `cmd/main.go` | Manager wiring: cache options, indexes, controller, API server |
 | `config/` | Kustomize: CRD, RBAC, manager, UI Service, NetworkPolicy, samples, `demo/` workload |
-| `hack/up.sh` | The `make up` bring-up script |
+| `hack/` | `up.sh` (`make up`), `ui.sh` (`make ui`), `env.sh` (loads `.env`) |
 
 ## Development
 
