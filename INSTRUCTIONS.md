@@ -9,13 +9,16 @@ your own cluster credentials.
   you use it) gets the cluster credentials and kubeconfig path:
 
   ```sh
+  cp .env.example .env    # first time only, then fill in the placeholders
   source .env && claude   # or just `source .env` if you're not using Claude Code
   ```
 
-  `.env` exports `KUBECONFIG` (pointing at the cluster's kubeconfig under
-  `.kube/`) and the credentials the commands need. It's gitignored, so never
-  commit it or paste its contents anywhere. Check you're on the right cluster
-  with `kubectl config current-context`.
+  `.env` exports `KUBECONFIG` (the cluster's kubeconfig under `.kube/`) and
+  the Claude Code settings: the OpenRouter API key, base URL, model overrides
+  and config dir. `.env.example` lists every key with placeholder values.
+  `.env` itself is gitignored, so never commit it or paste its contents
+  anywhere. Check you're on the right cluster with
+  `kubectl config current-context`.
 
 - Your user needs `get services`, `get pods` and `create pods/portforward` in
   the `clusterview-operator-system` namespace. Check with:
