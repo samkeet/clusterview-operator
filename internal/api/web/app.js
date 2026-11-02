@@ -609,6 +609,7 @@ let running = false;
 // tick runs one poll, then schedules the next only after this one finishes, so a
 // slow API never piles up overlapping requests (setInterval would).
 async function tick() {
+  if (location.hash === "#/pools") return; // pools.js polls on that page
   if (running) return;
   running = true;
   clearTimeout(timer);

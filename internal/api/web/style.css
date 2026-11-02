@@ -225,3 +225,26 @@ tr.sel td { background: #ddf4ff; }
 .pager button[disabled] { opacity: 0.4; cursor: default; }
 .pager button[aria-current="page"] { background: var(--accent); color: #fff; border-color: var(--accent); }
 .pager .gap { color: var(--muted); }
+
+/* ---- node pools (pools.js) ----
+   Everything below is prefixed cv- or scoped to the route, so it can't collide
+   with the Nodes page or the pod drawer. */
+.cv-nav { display: flex; gap: 4px; }
+.cv-nav a { padding: 2px 10px; border-radius: 6px; color: var(--fg); text-decoration: none; }
+.cv-nav a:hover { background: var(--bg); }
+.cv-nav a[aria-current="page"] { background: var(--bg); font-weight: 600; }
+
+/* The hash route picks the page; hidden pages keep their DOM. */
+body.route-pools #content,
+body.route-pools #summary,
+body.route-pools #updated,
+body.route-pools #banner { display: none; }
+body:not(.route-pools) #pools-page { display: none; }
+
+.cv-pools { padding: 16px 20px; display: grid; gap: 14px; }
+.cv-pools .banner { margin: 0; }
+.cv-toolbar { display: flex; gap: 12px; align-items: baseline; }
+.cv-host { display: grid; gap: 14px; }
+.cv-pool { background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+.cv-pool-head { padding: 12px 16px 0; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.cv-plain { margin: 0; padding: 8px 16px 12px 32px; }

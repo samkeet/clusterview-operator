@@ -19,6 +19,7 @@ func TestUI(t *testing.T) {
 		{path: "/", wantStatus: http.StatusOK, wantType: "text/html", wantContain: `src="/static/app.js"`},
 		{path: "/static/app.js", wantStatus: http.StatusOK, wantType: "text/javascript", wantContain: "/api/v1/nodes"},
 		{path: "/static/style.css", wantStatus: http.StatusOK, wantType: "text/css"},
+		{path: "/static/pools.js", wantStatus: http.StatusOK, wantType: "text/javascript", wantContain: "/api/v1/pools"},
 		// No directory listings, and unknown paths don't fall back to the UI.
 		{path: "/static/", wantStatus: http.StatusNotFound},
 		{path: "/nope", wantStatus: http.StatusNotFound},
@@ -55,13 +56,39 @@ func TestUIRejectsNonGET(t *testing.T) {
 // (pod names, event messages) must never be parsed as HTML. It matches property
 // and call syntax, so the header comment that names the rule doesn't trip it.
 func TestUIBuildsDOMWithoutHTMLParsing(t *testing.T) {
-	js, err := fs.ReadFile(webFS, "app.js")
+	for _, name := range []string{"app.js", "pools.js"} {
+		js, err := fs.ReadFile(webFS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, banned := range []string{".innerHTML", ".outerHTML", "insertAdjacentHTML(", "document.write(", "eval("} {
+			if strings.Contains(string(js), banned) {
+				t.Errorf("%s uses %s; build DOM with textContent instead", name, banned)
+			}
+		}
+	}
+}
+
+// TestPoolsJSSetsNoInlineStyle guards the CSP (default-src 'self'), which blocks
+// inline style attributes. Widths must go through the CSSOM (style.width) and
+// colours through classes.
+func TestPoolsJSSetsNoInlineStyle(t *testing.T) {
+	js, err := fs.ReadFile(webFS, "pools.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, banned := range []string{".innerHTML", ".outerHTML", "insertAdjacentHTML(", "document.write(", "eval("} {
+	for _, banned := range []string{`setAttribute("style"`, "setAttribute('style'", ".cssText", `style="`} {
 		if strings.Contains(string(js), banned) {
-			t.Errorf("app.js uses %s; build DOM with textContent instead", banned)
+			t.Errorf("pools.js uses %s, which the CSP blocks or bypasses the class rule", banned)
+		}
+	}
+}
+
+func TestUIHasPoolsRoute(t *testing.T) {
+	body := get(t, newHandler(t, nil), "/").Body.String()
+	for _, want := range []string{`href="#/"`, `href="#/pools"`, `id="pools-page"`, `src="/static/pools.js"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html lacks %s", want)
 		}
 	}
 }

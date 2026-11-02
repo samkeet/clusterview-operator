@@ -6,10 +6,12 @@
   <title>ClusterView</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
+  <script src="/static/pools.js" defer></script>
 </head>
 <body>
   <header>
     <h1>ClusterView</h1>
+    <nav class="cv-nav" aria-label="Pages"><a id="nav-nodes" href="#/">Nodes</a><a id="nav-pools" href="#/pools">Node pools</a></nav>
     <div id="summary" class="summary">Loading…</div>
     <div id="updated" class="updated"></div>
   </header>
@@ -34,6 +36,9 @@
       <p id="pods-empty" class="muted" hidden>No pods on this node.</p>
     </section>
   </main>
+
+  <!-- Node pool capacity map (#/pools), drawn by pools.js. -->
+  <section id="pools-page" class="cv-pools" aria-label="Node pools"></section>
 
   <!-- Pod drawer: an overlay, not modal, so the pod table stays usable behind it. -->
   <aside id="drawer" class="drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" hidden>
