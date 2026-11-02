@@ -3,10 +3,17 @@
 # operator (CRD, RBAC, NetworkPolicy, Deployment, UI Service), the sample
 # ClusterView and the 20-pod demo workload. Safe to re-run.
 #
-# Usage (from the repo root, after `source .env`):
-#   make up                                # build + push the image for HEAD, then deploy
+# Ends by opening the UI (hack/ui.sh). Loads .env itself if it isn't sourced.
+#
+# Usage:
+#   make up                                # build + push the image for HEAD, deploy, open the UI
 #   make up SKIP_BUILD=1 IMG=<image>       # deploy an image that's already pushed
+#   make up NO_UI=1                        # deploy only
 set -euo pipefail
+
+cd "$(dirname "$0")/.."
+# shellcheck source=hack/env.sh
+source hack/env.sh
 
 NS=clusterview-operator-system
 DEPLOY=clusterview-operator-controller-manager
@@ -18,7 +25,7 @@ step() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 step "Checking cluster access"
-[[ -n "${KUBECONFIG:-}" ]] || die "KUBECONFIG is not set. Run: source .env"
+[[ -n "${KUBECONFIG:-}" ]] || die "KUBECONFIG is not set. Copy .env.example to .env and fill it in"
 ctx=$("$KUBECTL" config current-context) || die "kubectl has no current context"
 "$KUBECTL" get nodes >/dev/null || die "can't reach the cluster in context $ctx"
 echo "context: $ctx"
@@ -69,11 +76,10 @@ for _ in $(seq 1 30); do
 done
 "$KUBECTL" get clusterview
 
-cat <<EOF
+if [[ "${NO_UI:-0}" == 1 ]]; then
+  printf '\nClusterView is up. Open the UI with: make ui\n'
+  exit 0
+fi
 
-ClusterView is up. Open the UI with:
-
-  make ui        # = kubectl -n $NS port-forward svc/clusterview-operator-ui 8080:80
-
-then browse to http://localhost:8080 (see INSTRUCTIONS.md).
-EOF
+step "Opening the UI"
+exec hack/ui.sh

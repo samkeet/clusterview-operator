@@ -180,8 +180,8 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 ##@ Project bring-up
 
 .PHONY: up
-up: kustomize ## Bring up everything on the KUBECONFIG cluster: image, operator, sample ClusterView, demo pods. SKIP_BUILD=1 reuses IMG.
-	IMG="$(IMG)" KUBECTL="$(KUBECTL)" MAKE="$(MAKE)" SKIP_BUILD="$(SKIP_BUILD)" ./hack/up.sh
+up: kustomize ## Bring up everything (image, operator, sample ClusterView, demo pods) and open the UI. SKIP_BUILD=1 reuses IMG, NO_UI=1 skips the UI.
+	@IMG="$(IMG)" KUBECTL="$(KUBECTL)" MAKE="$(MAKE)" SKIP_BUILD="$(SKIP_BUILD)" NO_UI="$(NO_UI)" ./hack/up.sh
 
 .PHONY: down
 down: kustomize ## Remove the demo pods, the sample ClusterView and the operator (also deletes the ghcr-pull secret).
