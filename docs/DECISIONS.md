@@ -197,3 +197,14 @@ One block per decision: the options we considered, then what we picked and why. 
 ## Aggregation: full rebuild, not incremental counters
 - Considered: incremental per-node counters updated in event handlers · full level-triggered rebuild
 - Chose the full rebuild: counters make each event O(1), but bring relist, missed-event and filter-change edge cases that the level-triggered design avoids, all to save a 0.47 ms rebuild. Revisit at around 100k pods.
+## Pod events UI: overlay drawer with Events / Logs / Details tabs
+- Considered (mockups in `docs/design/events/`): A overlay drawer with compact rows · B docked timeline with cursor pages · C tabbed pod panel with cards and a Warning filter
+- Chose A's drawer and compact rows plus C's pod header (namespace/phase/restarts/node chips) and tabs. The rows are the densest view of the three, and the tabs give pod logs and details a place without a later redesign. B's docked layout squeezes the pod table, and its timeline shows fewer events per screen. C's cards take more space per event.
+
+## Events pagination: offset, 5 per page, numbered pages
+- Considered: offset (`?limit=5&offset=N`) · cursor (`?before=<cursor>`, stable as events arrive)
+- Chose offset: it allows "1–5 of N" and numbered pages, and pods have few events (Kubernetes deletes them after about an hour), so shifting pages rarely matter. Only page 1 auto-refreshes, so an older page doesn't move under you. Cursor paging was rejected because it can't show page numbers.
+
+## Events source: cached informer indexed by involved object
+- Considered: query the API server on each click · informer cache of `events.k8s.io/v1` Events with an index on the object each event is about
+- Chose the cache: it keeps the "no API server calls per request" rule, and the index makes a lookup touch only that pod's events. The cost is cluster-wide list/watch on events and memory bounded by the event TTL. A transform drops managedFields. The controller doesn't watch events, because they don't affect CR status. Event messages are returned in full for now and reviewed in the security pass before going public.
