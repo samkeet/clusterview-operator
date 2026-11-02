@@ -1,0 +1,52 @@
+# Burstable QoS (requests < limits). pause keeps the pods idle and avoids
+# Docker Hub rate limits.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: demo-shop
+spec:
+  replicas: 6
+  selector:
+    matchLabels: {app: frontend}
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: web
+        image: registry.k8s.io/pause:3.10
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 200m, memory: 128Mi}
+---
+# Native sidecar (an init container with restartPolicy: Always). Its requests
+# add to the pod's effective requests, the case the capacity map must get right.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: demo-shop
+spec:
+  replicas: 4
+  selector:
+    matchLabels: {app: catalog}
+  template:
+    metadata:
+      labels: {app: catalog}
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+      - name: log-shipper
+        image: registry.k8s.io/pause:3.10
+        restartPolicy: Always
+        resources:
+          requests: {cpu: 25m, memory: 32Mi}
+          limits: {cpu: 50m, memory: 64Mi}
+      containers:
+      - name: api
+        image: registry.k8s.io/pause:3.10
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 100m, memory: 128Mi}

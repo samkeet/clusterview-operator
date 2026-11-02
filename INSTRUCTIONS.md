@@ -34,6 +34,42 @@ your own cluster credentials.
   kubectl -n clusterview-operator-system get pods
   ```
 
+## Spin up the whole project
+
+One command brings up everything on the cluster `KUBECONFIG` points at: the
+operator (CRD, RBAC, NetworkPolicy, Deployment, UI Service), the sample
+`ClusterView` and a 20-pod demo workload. It's safe to re-run.
+
+```sh
+source .env
+make up                                # build + push the image for HEAD, then deploy
+make up SKIP_BUILD=1 IMG=<image>       # or deploy an image that's already pushed
+make ui                                # port-forward, then open http://localhost:8080
+```
+
+`make up` needs the `ghcr-pull` image pull secret in
+`clusterview-operator-system`. It reuses the secret if it exists, creates it
+from `GHCR_PULL_TOKEN` (a `read:packages`-only PAT, see `.env.example`) if
+that's set, and otherwise stops and prints the command to create it. Building
+also needs podman and push access to `ghcr.io/samkeet/clusterview-operator`.
+
+Other targets:
+
+| Command | What it does |
+|---|---|
+| `make demo` / `make demo-down` | Apply or delete only the demo workload |
+| `make down` | Remove the demo pods, the sample `ClusterView` and the operator. This deletes the operator namespace, **including the `ghcr-pull` secret**, so set `GHCR_PULL_TOKEN` before the next `make up` |
+
+The demo workload (`config/demo/`) stays running for demos. It puts 20 pods in
+`demo-shop`, `demo-payments` and `demo-batch`:
+
+- Burstable, Guaranteed and BestEffort pods, plus a native sidecar
+  (`catalog`), so the capacity numbers cover the interesting cases.
+- `crashloop` restarts every few seconds and `not-ready` fails its readiness
+  probe, so both produce **Warning** events in the pod drawer.
+
+Together they request about 1.2 CPU cores and 1.5Gi of memory.
+
 ## Open the UI
 
 ```sh
@@ -66,6 +102,12 @@ Then open <http://localhost:9090>.
   means the control plane has lost contact with the node's kubelet.
 - Click a node to open **Pods on &lt;node&gt;**: a table of namespace, name,
   phase and restart count. **Close** hides it.
+- Click a pod name to open the **pod drawer** on the right: the pod's
+  namespace, phase, restarts and node, with **Events / Logs / Details** tabs.
+  Events shows the 5 latest, newest first, with page numbers. Warnings are
+  marked, and clicking a long message expands it. Kubernetes keeps events for
+  about an hour. **Esc** or **×** closes the drawer. Logs is a placeholder for
+  now. Try `demo-batch/crashloop-…` to see Warning events.
 
 The terminal running `port-forward` prints `Handling connection for 8080` for
 each request. If the port-forward drops, the page keeps showing the last data,
@@ -85,6 +127,7 @@ The JSON API is available on the same port, for example:
 curl -s localhost:8080/api/v1/summary
 curl -s localhost:8080/api/v1/nodes
 curl -s localhost:8080/api/v1/nodes/<node-name>/pods
+curl -s 'localhost:8080/api/v1/namespaces/<ns>/pods/<pod>/events?limit=5&offset=0'
 ```
 
 The API is read-only: it answers `GET` only, and every other method gets

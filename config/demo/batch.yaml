@@ -1,0 +1,68 @@
+# BestEffort (no requests or limits): no segment on the capacity map.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idle
+  namespace: demo-batch
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: idle}
+  template:
+    metadata:
+      labels: {app: idle}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: idle
+        image: registry.k8s.io/pause:3.10
+---
+# Exits after 10s, so it restarts with back-off: restart counts and Warning
+# BackOff events for the events drawer.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crashloop
+  namespace: demo-batch
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: crashloop}
+  template:
+    metadata:
+      labels: {app: crashloop}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command: ["sh", "-c", "echo 'demo: failing on purpose'; sleep 10; exit 1"]
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 50m, memory: 32Mi}
+---
+# Runs fine but never becomes Ready: Warning Unhealthy events every 10s.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: not-ready
+  namespace: demo-batch
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: not-ready}
+  template:
+    metadata:
+      labels: {app: not-ready}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command: ["sh", "-c", "sleep 2147483647"]
+        readinessProbe:
+          exec: {command: ["false"]}
+          periodSeconds: 10
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 50m, memory: 32Mi}
