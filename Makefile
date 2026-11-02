@@ -1,6 +1,9 @@
 # Image URL to use all building/pushing image targets.
 # Tagged with the git short SHA so every deploy pulls a new, unambiguous image.
 IMG ?= ghcr.io/samkeet/clusterview-operator:$(shell git rev-parse --short HEAD)
+# The released image `make up` deploys by default: built, pushed and verified on the
+# cluster. Bump hack/IMAGE in the PR that releases a new one (see README, Releasing).
+RELEASE_IMG ?= $(shell cat hack/IMAGE)
 # The DOKS nodes are amd64. Pinning the platform keeps an arm64 laptop from shipping an arm64 image.
 IMAGE_PLATFORM ?= linux/amd64
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
@@ -158,9 +161,20 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 
 ##@ Project bring-up
 
+# make up never builds: it deploys the pinned release image, or an image you name
+# with IMG=... (command line or environment). Building is `make release`.
+UP_IMG = $(if $(filter command line environment,$(origin IMG)),$(IMG),$(RELEASE_IMG))
+
 .PHONY: up
-up: kustomize ## Bring up everything (image, operator, sample ClusterView, demo pods) and open the UI. SKIP_BUILD=1 reuses IMG, NO_UI=1 skips the UI.
-	@IMG="$(IMG)" KUBECTL="$(KUBECTL)" MAKE="$(MAKE)" SKIP_BUILD="$(SKIP_BUILD)" NO_UI="$(NO_UI)" ./hack/up.sh
+up: kustomize ## Bring up everything (operator, sample ClusterView, demo pods) from the pinned image in hack/IMAGE (no build), then open the UI. IMG=<image> deploys another pushed image; NO_UI=1 skips the UI.
+	@IMG="$(UP_IMG)" KUBECTL="$(KUBECTL)" NO_UI="$(NO_UI)" ./hack/up.sh
+
+.PHONY: release
+release: ## Maintainers: build and push the image for HEAD (needs podman + GHCR push), then pin it in hack/IMAGE. Commit the pin once it's verified on the cluster.
+	@test -z "$$(git status --porcelain --untracked-files=no)" || { echo "error: commit your changes first; the image is tagged with the HEAD SHA"; exit 1; }
+	$(MAKE) docker-build docker-push IMG="$(IMG)"
+	echo "$(IMG)" > hack/IMAGE
+	@echo "Pinned $(IMG) in hack/IMAGE. Deploy it with 'make up', verify, then commit hack/IMAGE."
 
 .PHONY: down
 down: kustomize ## Remove the demo pods, the sample ClusterView and the operator (also deletes the ghcr-pull secret).

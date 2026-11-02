@@ -6,9 +6,9 @@
 # Ends by opening the UI (hack/ui.sh). Loads .env itself if it isn't sourced.
 #
 # Usage:
-#   make up                                # build + push the image for HEAD, deploy, open the UI
-#   make up SKIP_BUILD=1 IMG=<image>       # deploy an image that's already pushed
-#   make up NO_UI=1                        # deploy only
+#   make up                  # deploy the pinned release image (hack/IMAGE), open the UI
+#   make up IMG=<image>      # deploy another image that's already pushed
+#   make up NO_UI=1          # deploy only
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,11 +30,9 @@ ctx=$("$KUBECTL" config current-context) || die "kubectl has no current context"
 "$KUBECTL" get nodes >/dev/null || die "can't reach the cluster in context $ctx"
 echo "context: $ctx"
 echo "image:   $IMG"
+# Nothing is built here: the image is already in GHCR, so bring-up needs no
+# podman or push access. Maintainers publish new images with `make release`.
 
-if [[ "${SKIP_BUILD:-0}" != 1 ]]; then
-  step "Building and pushing the image (linux/amd64)"
-  "$MAKE" docker-build docker-push IMG="$IMG"
-fi
 
 # The namespace must exist before the pull secret, and the secret before the pod
 # pulls. Applying the namespace on its own is idempotent.

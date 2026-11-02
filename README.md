@@ -25,18 +25,31 @@ cp .env.example .env     # first time: fill in KUBECONFIG and credentials
 make up                  # image, operator, sample ClusterView, 20 demo pods, then opens the UI
 ```
 
-`make up` loads `.env` itself and is safe to re-run. Use
-`make up SKIP_BUILD=1 IMG=<image>` to deploy an image that's already pushed, and
-`make ui` to reopen the UI later. [INSTRUCTIONS.md](INSTRUCTIONS.md) has the full
-walkthrough, prerequisites, what you should see, and troubleshooting.
+`make up` and `make ui` load `.env` themselves (a `KUBECONFIG` you've already
+exported takes precedence), so there's no separate `source .env` step. `make up`
+is safe to re-run. It ends by running `make ui`, so it **keeps running until
+Ctrl-C**. Use `NO_UI=1` to deploy and return. Run `make ui` to reopen the UI
+later. [INSTRUCTIONS.md](INSTRUCTIONS.md) has the full walkthrough,
+prerequisites, what you should see, and troubleshooting.
 
 | Command | What it does |
 |---|---|
 | `make up` | Build and push the image (linux/amd64), ensure the pull secret, deploy, apply the sample `ClusterView` and the demo workload, then run `make ui` |
-| `make ui` | Port-forward the UI (8080, or a random free port if that's taken), open the browser, reconnect if the forward drops |
+| `make ui` | Check you can port-forward and the operator is ready, port-forward the UI (8080, or a random free port if that's taken), open the browser, and reconnect if the forward drops (e.g. after a redeploy). Ctrl-C stops it |
 | `make demo` / `make demo-down` | Apply or delete only the 20-pod demo workload (`config/demo/`) |
-| `make down` | Remove the demo, the sample and the operator. This also deletes the `ghcr-pull` secret |
+| `make down` | Remove the demo, the sample and the operator. This also deletes the `ghcr-pull` secret; set `GHCR_PULL_TOKEN` in `.env` so the next `make up` can recreate it |
 | `make test` / `make lint` | Unit + envtest suites / golangci-lint |
+
+Options:
+
+| Option | Applies to | Effect |
+|---|---|---|
+| `SKIP_BUILD=1 IMG=<image>` | `make up` | Skip the build and push, and deploy an image that's already pushed |
+| `NO_UI=1` | `make up` | Deploy only. Don't start the port-forward or open the browser |
+| `PORT=<port>` | `make ui` | Prefer another local port (default 8080). It still falls back to a random free port if that one's taken |
+| `NO_BROWSER=1` | `make ui` | Print the URL instead of opening a browser |
+
+`make help` lists every target.
 
 ## The `ClusterView` resource
 
