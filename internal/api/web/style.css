@@ -100,3 +100,128 @@ th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--bord
 th { color: var(--muted); font-weight: 600; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 td.restarts-high { color: var(--bad); font-weight: 600; }
+
+/* Elements that set their own display (flex, grid) must still obey hidden. */
+[hidden] { display: none !important; }
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+.pad { margin: 0; padding: 12px 16px; }
+
+/* Pod name in the pods table: a real button, so it's keyboard-reachable. */
+.pod-link {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  word-break: break-all;
+}
+.pod-link:hover { text-decoration: underline; }
+tr.sel td { background: #ddf4ff; }
+
+/* Outlined chips for the drawer header and event types (the filled .badge is
+   used by node cards). */
+.chip {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.chip.ok { color: var(--ok); border-color: var(--ok); }
+.chip.warn { color: var(--unknown); border-color: var(--unknown); }
+.chip.bad { color: var(--bad); border-color: var(--bad); background: #ffebe9; }
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 10;
+  height: 100vh;
+  width: min(420px, 100vw);
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+.d-head { padding: 14px 16px 0; display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+.d-head h2 { font-size: 13px; font-weight: 600; }
+.x { border: 0; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: var(--muted); }
+.facts { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 16px; }
+.drawer .banner { margin: 0 16px 8px; border-color: var(--unknown); background: #fff8c5; }
+.tabs { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.tab {
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.tab[aria-selected="true"] { border-color: var(--accent); font-weight: 600; }
+.d-body { overflow: auto; flex: 1; }
+
+.details { margin: 0; padding: 12px 16px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 13px; }
+.details dt { color: var(--muted); }
+.details dd { margin: 0; word-break: break-all; }
+
+.hint { margin: 0; padding: 10px 16px 4px; font-size: 12px; }
+.events { list-style: none; margin: 0; padding: 0; }
+.ev { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.ev.w { border-left: 3px solid var(--bad); padding-left: 13px; }
+.ev-top { display: flex; gap: 8px; align-items: center; }
+.ev-top .age { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* The message is a button so it can be expanded by keyboard; it looks like text.
+   Two lines until expanded. */
+.ev-msg {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  width: 100%;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.ev-msg[aria-expanded="true"] { -webkit-line-clamp: unset; }
+/* Short messages that fit in two lines have nothing to expand. */
+.ev-msg:disabled { cursor: text; color: var(--fg); }
+
+.note {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 16px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #ddf4ff;
+  font-size: 13px;
+}
+.panel > .banner { margin-top: 8px; }
+
+.d-foot { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.d-foot .range { margin-right: auto; font-size: 12px; }
+.pager button, .note button {
+  font: inherit;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pager button[disabled] { opacity: 0.4; cursor: default; }
+.pager button[aria-current="page"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pager .gap { color: var(--muted); }

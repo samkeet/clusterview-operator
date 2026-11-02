@@ -183,6 +183,33 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 
+##@ Project bring-up
+
+.PHONY: up
+up: kustomize ## Bring up everything on the KUBECONFIG cluster: image, operator, sample ClusterView, demo pods. SKIP_BUILD=1 reuses IMG.
+	IMG="$(IMG)" KUBECTL="$(KUBECTL)" MAKE="$(MAKE)" SKIP_BUILD="$(SKIP_BUILD)" ./hack/up.sh
+
+.PHONY: down
+down: kustomize ## Remove the demo pods, the sample ClusterView and the operator (also deletes the ghcr-pull secret).
+	-"$(KUSTOMIZE)" build config/demo | "$(KUBECTL)" delete --ignore-not-found -f -
+	-"$(KUBECTL)" delete --ignore-not-found -f config/samples/observe_v1alpha1_clusterview.yaml
+	$(MAKE) undeploy ignore-not-found=true
+
+.PHONY: demo
+demo: kustomize ## Apply the 20-pod demo workload (demo-shop, demo-payments, demo-batch) and wait for it.
+	"$(KUSTOMIZE)" build config/demo | "$(KUBECTL)" apply -f -
+	@# crashloop and not-ready never become healthy by design, so only wait for the rest.
+	for d in demo-shop/frontend demo-shop/catalog demo-payments/ledger demo-payments/api demo-batch/idle; do \
+		"$(KUBECTL)" -n $${d%%/*} rollout status deploy/$${d#*/} --timeout=180s; done
+
+.PHONY: demo-down
+demo-down: kustomize ## Delete the demo workload.
+	"$(KUSTOMIZE)" build config/demo | "$(KUBECTL)" delete --ignore-not-found -f -
+
+.PHONY: ui
+ui: ## Port-forward the UI to http://localhost:8080 (Ctrl-C to stop).
+	"$(KUBECTL)" -n clusterview-operator-system port-forward svc/clusterview-operator-ui 8080:80
+
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -

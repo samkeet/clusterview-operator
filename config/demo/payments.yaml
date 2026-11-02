@@ -1,0 +1,43 @@
+# Guaranteed QoS (requests == limits).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger
+  namespace: demo-payments
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: ledger}
+  template:
+    metadata:
+      labels: {app: ledger}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: ledger
+        image: registry.k8s.io/pause:3.10
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {cpu: 100m, memory: 128Mi}
+---
+# Burstable with only a memory limit: the CPU limit shows as 0 ("no limit").
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: demo-payments
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: api
+        image: registry.k8s.io/pause:3.10
+        resources:
+          requests: {cpu: 100m, memory: 96Mi}
+          limits: {memory: 256Mi}

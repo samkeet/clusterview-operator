@@ -26,6 +26,8 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -177,10 +179,19 @@ func main() {
 		// Per-type transforms shrink cached Pods and Nodes to what clusterstate and
 		// the controller read. ByObject (not DefaultTransform) leaves ClusterView,
 		// which the controller patches, untouched.
+		//
+		// Events are cached only for the API's pod events drawer (the controller
+		// never reads them). The field selector keeps ReplicaSet, Deployment,
+		// Lease and other events out of memory. The namespace filter can't be
+		// applied here: it's per-CR and changes at runtime, so it's applied per request.
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
 				&corev1.Pod{}:  {Transform: api.StripPod},
 				&corev1.Node{}: {Transform: api.StripNode},
+				&eventsv1.Event{}: {
+					Field:     fields.OneTermEqualSelector("regarding.kind", "Pod"),
+					Transform: api.StripEvent,
+				},
 			},
 		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
@@ -207,6 +218,14 @@ func main() {
 	// Index pods by node so /api/v1/nodes/{name}/pods reads only that node's pods.
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, api.PodNodeNameField, api.PodNodeName); err != nil {
 		setupLog.Error(err, "Failed to index pods", "field", api.PodNodeNameField)
+		os.Exit(1)
+	}
+	// Index events by the object they're about, so a pod's events are a direct
+	// lookup. Registering the index also creates the Event informer now, so the
+	// cache syncs it before the API server (a non-leader runnable) starts.
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &eventsv1.Event{},
+		api.EventRegardingField, api.EventRegarding); err != nil {
+		setupLog.Error(err, "Failed to index events", "field", api.EventRegardingField)
 		os.Exit(1)
 	}
 
