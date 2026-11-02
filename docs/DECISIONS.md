@@ -174,6 +174,29 @@ One block per decision: the options we considered, then what we picked and why. 
 - Considered: rely on `loadBalancerSourceRanges` alone · also confirm NodePorts aren't publicly reachable
 - Chose to confirm first: a LoadBalancer Service also opens a NodePort on every node. If the DOKS firewall allows 30000-32767, traffic to a node's public IP skips the LB's source-range firewall, and only app-level auth would cover it. The LB access method (source ranges vs auth, TLS) is decided at that step.
 
+## Controller cache reads: zero-copy with a guard test (deferred, #21)
+- Considered: keep deep-copying · `client.UnsafeDisableDeepCopy` · zero-copy plus a test that inputs are unchanged
+- Chose zero-copy plus the guard test, not implemented yet: `observe()` deep-copies every cached Pod and Node on every reconcile, including throttled ones (10.4 ms and 48.5 MB per reconcile at 500 nodes / 15k pods, vs 0.47 ms and 0.3 MB without the copy). Tradeoff: the items share maps and slices with the informer cache, so an in-place change, such as sorting `node.Status.Conditions`, would silently corrupt it for every reader. The fake client still copies, so only the guard test (deep-copy the input, run `Build`, assert the input is unchanged) catches that.
+
+## Throttle check before rebuilding (deferred, #22)
+- Considered: always observe, then decide · return early when the throttle blocks the write and the generation is unchanged
+- Chose the early return, not implemented yet: today the rebuilt snapshot is thrown away whenever the throttle blocks the write. The level-triggered design is unchanged, because the requeued run reads the full current cache. Tradeoff: part of `decide()` is duplicated and needs its own table test.
+
+## `GOMEMLIMIT` from the container memory limit (deferred, #23)
+- Considered: leave the Go GC unaware of the limit · hard-code a value · set it from `limits.memory` through the downward API
+- Chose the downward API, not implemented yet: GC then works harder as the heap nears 256Mi, instead of the pod being OOM-killed. The value follows the manifest automatically.
+
+## API response cost: versioned snapshot, ETag from the version (deferred, #24, #25)
+- Considered: rebuild per request (today) · a fixed-time cache · informer-driven version counter with an ETag derived from it and an LRU of encoded bodies · plus a concurrency limit
+- Chose the version counter, the LRU and a concurrency limit, not implemented yet: today the ETag is computed from the body, so a 304 costs as much as a 200 (1.31 ms vs 1.35 ms at 15k pods). With an ETag of `hash(version, query, generation)`, a 304 is answered before any work. The concurrency limit (503 when full) caps the total cost, since about 1.3 ms of CPU per request uses up the 500m limit at roughly 370 requests per second. The concurrency limit must land before the public LoadBalancer.
+
+## Dashboard filters: only narrow the CR filter, use indexes and a slim model (deferred, #26)
+- Considered: filter in the browser · server-side scans of raw Pods · cache indexes for selective filters plus a slim per-snapshot model for free-text filters
+- Chose indexes plus the slim model, design only: if filters are added, they're GET query parameters from an allowlist, validated and size-capped. They're always intersected with `spec.namespaces` and can never widen it, because the CR filter is the admin boundary. Results are capped or paginated. The cache key is (snapshot version, normalized query), building on #24.
+
+## Aggregation: full rebuild, not incremental counters
+- Considered: incremental per-node counters updated in event handlers · full level-triggered rebuild
+- Chose the full rebuild: counters make each event O(1), but bring relist, missed-event and filter-change edge cases that the level-triggered design avoids, all to save a 0.47 ms rebuild. Revisit at around 100k pods.
 ## Pod events UI: overlay drawer with Events / Logs / Details tabs
 - Considered (mockups in `docs/design/events/`): A overlay drawer with compact rows · B docked timeline with cursor pages · C tabbed pod panel with cards and a Warning filter
 - Chose A's drawer and compact rows plus C's pod header (namespace/phase/restarts/node chips) and tabs. The rows are the densest view of the three, and the tabs give pod logs and details a place without a later redesign. B's docked layout squeezes the pod table, and its timeline shows fewer events per screen. C's cards take more space per event.
