@@ -309,3 +309,16 @@ body:not(.route-pools) #pools-page { display: none; }
 .cv-ns-5 { background: #6250d6; }
 .cv-ns-sys { background: #8c959f; }
 .cv-ns-other { background: #57606a; }
+
+.cv-node { cursor: pointer; }
+.cv-node:hover, .cv-node.sel { background: var(--bg); }
+.cv-detail { padding: 0 16px 14px; }
+.cv-detail-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 8px 0; }
+.cv-detail-head h3 { margin: 0; font-size: 13px; }
+.cv-detail-head .cv-link { margin-left: auto; }
+.cv-scroll { overflow-x: auto; }
+.cv-table { font-size: 12.5px; }
+.cv-table th, .cv-table td { white-space: nowrap; }
+.chip.cv-q-Guaranteed { color: var(--ok); border-color: var(--ok); }
+.chip.cv-q-Burstable { color: var(--accent); border-color: var(--accent); }
+.cv-link.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }

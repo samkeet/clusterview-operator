@@ -33,6 +33,7 @@
     off: new Set(),        // namespaces hidden with the legend
     colours: new Map(),    // namespace -> colour class, sticky for the session
     nextSlot: 0,
+    selected: null,        // node whose pod table is open
   };
 
   const page = document.getElementById("pools-page");
@@ -215,7 +216,14 @@
     grid.append(hdr);
     for (const n of pool.nodes) grid.append(nodeRow(n));
     sec.append(grid);
+    const open = pool.nodes.find((n) => n.name === ps.selected);
+    if (open) sec.append(podTable(open));
     return sec;
+  }
+
+  function select(name) {
+    ps.selected = ps.selected === name ? null : name;
+    render();
   }
 
   function nodeRow(n) {
@@ -223,9 +231,18 @@
     const shown = pods.length !== n.pods.length;
     const totals = shown ? sumPods(pods) : n.totals;
 
-    const row = el("div", "cv-row");
+    const selected = n.name === ps.selected;
+    const row = el("div", "cv-row cv-node" + (selected ? " sel" : ""));
+    // The whole row is clickable; the name is a real button for the keyboard
+    // (its click bubbles to the row, so there's one handler).
+    row.addEventListener("click", () => select(n.name));
     const name = el("span", "cv-name");
-    name.append(el("span", "mono", n.name));
+    const open = el("button", "cv-link mono", n.name);
+    open.type = "button";
+    open.dataset.key = "node:" + n.name;
+    open.setAttribute("aria-expanded", String(selected));
+    open.title = selected ? "Hide pods" : "Show pods";
+    name.append(open);
     if (n.status !== "Ready") name.append(el("span", "badge " + n.status, n.status));
     if (!n.schedulable) name.append(el("span", "badge cordoned", "Cordoned"));
     row.append(name);
@@ -276,6 +293,56 @@
     return cell;
   }
 
+  // podTable is the kubectl describe node "Non-terminated Pods" table, with each
+  // value's share of allocatable. Rows follow the legend filter.
+  function podTable(n) {
+    const pods = visiblePods(n);
+    const box = el("div", "cv-detail");
+    const head = el("div", "cv-detail-head");
+    head.append(el("h3", "mono", n.name));
+    head.append(el("span", "muted", `Non-terminated pods (${pods.length} shown)`));
+    const close = el("button", "cv-link", "Close");
+    close.type = "button";
+    close.dataset.key = "close:" + n.name;
+    close.addEventListener("click", () => select(n.name));
+    head.append(close);
+    box.append(head);
+    if (pods.length === 0) {
+      box.append(el("p", "muted", "No pods to show on this node."));
+      return box;
+    }
+
+    const table = el("table", "cv-table");
+    const tr = el("tr");
+    for (const h of ["Namespace", "Pod", "QoS", "CPU req", "CPU lim", "Mem req", "Mem lim"]) {
+      tr.append(el("th", h.includes(" ") ? "num" : "", h));
+    }
+    const thead = el("thead");
+    thead.append(tr);
+    const tbody = el("tbody");
+    for (const p of pods) {
+      const row = el("tr");
+      const ns = el("td");
+      ns.append(el("i", "cv-dot " + colourOf(p.namespace)), document.createTextNode(p.namespace));
+      const qos = el("td");
+      qos.append(el("span", "chip cv-q-" + (p.qos || "none"), p.qos || "-"));
+      row.append(ns, el("td", "mono", p.name), qos);
+      for (const [r, key] of [[RESOURCES.cpu, "req"], [RESOURCES.cpu, "lim"], [RESOURCES.mem, "req"], [RESOURCES.mem, "lim"]]) {
+        const v = p[r[key]];
+        const alloc = n.allocatable[r.alloc];
+        const td = el("td", "num", `${r.fmt(v)} (${pct(v, alloc)}%)`);
+        if (key === "lim" && v === 0) td.title = "no limit"; // 0 means unset, as in describe
+        row.append(td);
+      }
+      tbody.append(row);
+    }
+    table.append(thead, tbody);
+    const scroll = el("div", "cv-scroll");
+    scroll.append(table);
+    box.append(scroll);
+    return box;
+  }
+
   // ---- data ----
 
   // poll re-renders only when something changed: a 200, or the API going away or
@@ -291,6 +358,10 @@
         ps.data = r.body;
         ps.etag = r.etag;
         assignColours(namespacesIn(r.body));
+        // The selected node left the cluster: close its table.
+        if (ps.selected && !r.body.pools.some((pl) => pl.nodes.some((n) => n.name === ps.selected))) {
+          ps.selected = null;
+        }
         changed = true;
       }
     } catch (e) {
