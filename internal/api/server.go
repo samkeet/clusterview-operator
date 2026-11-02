@@ -85,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	// Patterns carry no method on purpose: getOnly rejects everything but GET up
 	// front, whereas a "GET /x" pattern would also answer HEAD.
 	mux.HandleFunc("/api/v1/summary", s.summary)
+	mux.HandleFunc("/api/v1/pools", s.pools)
 	mux.HandleFunc("/api/v1/nodes", s.nodes)
 	mux.HandleFunc("/api/v1/nodes/{name}/pods", s.nodePods)
 	mux.HandleFunc("/api/v1/namespaces/{ns}/pods/{name}/events", s.podEvents)
