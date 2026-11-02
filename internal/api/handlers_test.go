@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -43,12 +44,13 @@ func testScheme(t *testing.T) *runtime.Scheme {
 }
 
 // newHandler builds the real routes over a fake client that has the same field
-// index main.go registers on the cache, so MatchingFields behaves as in production.
+// indexes main.go registers on the cache, so MatchingFields behaves as in production.
 func newHandler(t *testing.T, funcs *interceptor.Funcs, objs ...client.Object) http.Handler {
 	t.Helper()
 	b := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithIndex(&corev1.Pod{}, PodNodeNameField, PodNodeName).
+		WithIndex(&eventsv1.Event{}, EventRegardingField, EventRegarding).
 		WithObjects(objs...)
 	if funcs != nil {
 		b = b.WithInterceptorFuncs(*funcs)
@@ -295,7 +297,7 @@ func TestETagChangesWithNamespaceFilter(t *testing.T) {
 
 func TestNonGETMethodsRejected(t *testing.T) {
 	h := newHandler(t, nil, sampleObjects()...)
-	paths := []string{pathSummary, pathNodes, pathN1Pods, "/healthz"}
+	paths := []string{pathSummary, pathNodes, pathN1Pods, "/api/v1/namespaces/a/pods/web-0/events", "/healthz"}
 	methods := []string{http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions}
 	for _, path := range paths {
 		for _, m := range methods {
