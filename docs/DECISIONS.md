@@ -242,3 +242,20 @@ One block per decision: the options we considered, then what we picked and why. 
 ## `/api/v1/pools` payload: every pod, minimal fields
 - Considered: per-pod data loaded per node (like the Nodes page) · everything in one response
 - Chose one response: the capacity map draws every node's per-pod segments at once. Each pod carries only 7 small fields and the poll is ETag'd, so it costs a few hundred bytes per pod only when something changes. Tradeoff: payload grows with the pod count. If that becomes a problem, segments under ~1% can be folded into "other".
+
+## Pool capacity math: kubectl's own helper, truncated percentages
+- Considered: hand-written max(init)/sum(containers) · copying kubectl's code · `k8s.io/component-helpers/resource`
+- Chose the helper with kubectl 1.37's options (`UseStatusResources`, pod-level resources on): it's the code `kubectl describe node` runs, so sidecars, init containers, overhead and in-place resize can't drift. Percentages are truncated, as describe does (310m/3890m prints 7%, not 8%). Segment widths use the exact value. Adds one module (`k8s.io/component-helpers v0.37.0`) with no version bumps. Cilium's limit coming from an init container is the real-cluster test case.
+
+## Pool view details (approved picks)
+- The events drawer closes when switching to `#/pools`.
+- With a namespace filter set, node totals cover the included namespaces only and are labelled "(filtered namespaces)". There's no hidden "other" aggregate (minimal scope).
+- Pools show `instanceType` when all their nodes share one.
+- An unset limit shows `0` like describe, with a "no limit" hover.
+- The fallback group is named `(unpooled)`. Parentheses aren't valid in label values, so a real pool can't collide with it.
+- Contract changes: nodes gain `schedulable`; the response is `{pools:[…]}`; an empty label counts as unpooled.
+- Namespace colours: `kube-system` is grey, the others get sticky session slots from a 6-colour palette (no red or green, to avoid confusion with status). They're CSS classes, and widths are set through the CSSOM, so CSP holds.
+
+## Demo workload and one-command bring-up
+- Considered: ad-hoc throwaway pods · a committed `config/demo/` workload; README steps · a `make up` target
+- Chose a committed 20-pod workload in 3 namespaces (`demo-shop`, `demo-payments`, `demo-batch`), kept running for the demo. It covers Burstable, Guaranteed and BestEffort QoS, a native sidecar, a crash loop and a failing readiness probe, so both the capacity map and the events drawer have real data. `make up` (via `hack/up.sh`) checks the env, builds and pushes (or reuses an image with `SKIP_BUILD=1`), ensures the pull secret, deploys, applies the sample ClusterView and the demo, then prints the port-forward command. `make down` reverses it. Steady pods use `registry.k8s.io/pause` to avoid Docker Hub rate limits.
