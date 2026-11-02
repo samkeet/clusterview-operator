@@ -30,9 +30,9 @@ One block per decision: the options we considered, then what we picked and why. 
 - Considered: push to main · squash-merge PRs · merge-commit PRs
 - Chose merge commits: CLAUDE.md requires PRs and forbids squashing, so small commits keep their history. Deploying the branch before merging means main is always something that ran on the cluster.
 
-## UI exposure: port-forward first, public LoadBalancer later
-- Considered: public LoadBalancer now · ClusterIP + `kubectl port-forward` · Ingress
-- Chose port-forward first: the API has no auth, so we test locally before exposing cluster data publicly. The LoadBalancer comes once things have been checked.
+## UI exposure: port-forward only (final)
+- Considered: public LoadBalancer · ClusterIP + `kubectl port-forward` · Ingress · Cloudflare Tunnel + Access
+- Chose port-forward only: the API has no auth of its own, so port-forward makes access ride on cluster credentials and RBAC (`create pods/portforward`), and nothing is exposed to the internet. That removes the LoadBalancer, the NodePort-bypass risk and TLS/auth work. TASK.md accepts "port-forward instructions"; they're in `INSTRUCTIONS.md`. Started as "port-forward first, LoadBalancer later"; the user decided against public exposure.
 
 ## `refreshInterval` semantics: minimum time between status writes
 - Considered: poll the API server every N · write on every relevant event · fixed timer only · event-driven reconcile with a write throttle
@@ -174,6 +174,29 @@ One block per decision: the options we considered, then what we picked and why. 
 - Considered: rely on `loadBalancerSourceRanges` alone · also confirm NodePorts aren't publicly reachable
 - Chose to confirm first: a LoadBalancer Service also opens a NodePort on every node. If the DOKS firewall allows 30000-32767, traffic to a node's public IP skips the LB's source-range firewall, and only app-level auth would cover it. The LB access method (source ranges vs auth, TLS) is decided at that step.
 
+## Controller cache reads: zero-copy with a guard test (deferred, #21)
+- Considered: keep deep-copying · `client.UnsafeDisableDeepCopy` · zero-copy plus a test that inputs are unchanged
+- Chose zero-copy plus the guard test, not implemented yet: `observe()` deep-copies every cached Pod and Node on every reconcile, including throttled ones (10.4 ms and 48.5 MB per reconcile at 500 nodes / 15k pods, vs 0.47 ms and 0.3 MB without the copy). Tradeoff: the items share maps and slices with the informer cache, so an in-place change, such as sorting `node.Status.Conditions`, would silently corrupt it for every reader. The fake client still copies, so only the guard test (deep-copy the input, run `Build`, assert the input is unchanged) catches that.
+
+## Throttle check before rebuilding (deferred, #22)
+- Considered: always observe, then decide · return early when the throttle blocks the write and the generation is unchanged
+- Chose the early return, not implemented yet: today the rebuilt snapshot is thrown away whenever the throttle blocks the write. The level-triggered design is unchanged, because the requeued run reads the full current cache. Tradeoff: part of `decide()` is duplicated and needs its own table test.
+
+## `GOMEMLIMIT` from the container memory limit (deferred, #23)
+- Considered: leave the Go GC unaware of the limit · hard-code a value · set it from `limits.memory` through the downward API
+- Chose the downward API, not implemented yet: GC then works harder as the heap nears 256Mi, instead of the pod being OOM-killed. The value follows the manifest automatically.
+
+## API response cost: versioned snapshot, ETag from the version (deferred, #24, #25)
+- Considered: rebuild per request (today) · a fixed-time cache · informer-driven version counter with an ETag derived from it and an LRU of encoded bodies · plus a concurrency limit
+- Chose the version counter, the LRU and a concurrency limit, not implemented yet: today the ETag is computed from the body, so a 304 costs as much as a 200 (1.31 ms vs 1.35 ms at 15k pods). With an ETag of `hash(version, query, generation)`, a 304 is answered before any work. The concurrency limit (503 when full) caps the total cost, since about 1.3 ms of CPU per request uses up the 500m limit at roughly 370 requests per second. The concurrency limit must land before the public LoadBalancer.
+
+## Dashboard filters: only narrow the CR filter, use indexes and a slim model (deferred, #26)
+- Considered: filter in the browser · server-side scans of raw Pods · cache indexes for selective filters plus a slim per-snapshot model for free-text filters
+- Chose indexes plus the slim model, design only: if filters are added, they're GET query parameters from an allowlist, validated and size-capped. They're always intersected with `spec.namespaces` and can never widen it, because the CR filter is the admin boundary. Results are capped or paginated. The cache key is (snapshot version, normalized query), building on #24.
+
+## Aggregation: full rebuild, not incremental counters
+- Considered: incremental per-node counters updated in event handlers · full level-triggered rebuild
+- Chose the full rebuild: counters make each event O(1), but bring relist, missed-event and filter-change edge cases that the level-triggered design avoids, all to save a 0.47 ms rebuild. Revisit at around 100k pods.
 ## Pod events UI: overlay drawer with Events / Logs / Details tabs
 - Considered (mockups in `docs/design/events/`): A overlay drawer with compact rows · B docked timeline with cursor pages · C tabbed pod panel with cards and a Warning filter
 - Chose A's drawer and compact rows plus C's pod header (namespace/phase/restarts/node chips) and tabs. The rows are the densest view of the three, and the tabs give pod logs and details a place without a later redesign. B's docked layout squeezes the pod table, and its timeline shows fewer events per screen. C's cards take more space per event.
@@ -201,3 +224,21 @@ One block per decision: the options we considered, then what we picked and why. 
 ## Events response: whole-body ETag, `name` per event, page-1 polling for "new events"
 - Considered: ETag on events only · whole body; detect new events by `total` · by page 1's ETag
 - Chose the whole-body ETag ("1–5 of N" changing is a real change) and a stable `name` per event, so expanded rows survive re-renders. On older pages the UI still polls page 1 with its ETag, which also catches ×count bumps that `total` misses. Polling runs only while the drawer is open on the Events tab.
+
+## Node pool view: capacity map (B), minimal scope
+- Considered (mockups in `docs/design/pools/`): A pool → node accordion · B capacity map with one stacked segment per pod, coloured by namespace · C namespace × pool matrix
+- Chose B: it answers "which pods are using up this node, and from which namespace" at a glance, with a namespace legend filter and a click-through `kubectl describe`-style pod table. A shows totals but hides who uses them. C is a separate question we don't need yet.
+- In scope: a `#/pools` page with Nodes | Node pools nav, and one `GET /api/v1/pools` endpoint (pools → nodes → pods with namespace, name, CPU/memory requests and limits, QoS) with an ETag. The node table reads from the same response.
+- Out of scope for now: actual usage, a configurable pool label, the namespace matrix, sorting, deep links.
+
+## Capacity numbers: requests and limits as % of allocatable, like kubectl describe
+- Considered: requests/limits from pod specs · real usage from metrics-server
+- Chose requests/limits: metrics-server isn't installed, and they need no new permissions or components. Effective pod requests are computed like kubectl (init/sidecar containers, overhead, pod-level resources) with `k8s.io/component-helpers/resource`. Only non-terminated pods count. Limits above 100% are flagged as overcommitted.
+
+## Pool grouping: hardcoded DOKS label, "unpooled" fallback
+- Considered: hardcode `doks.digitalocean.com/node-pool` · a `--nodepool-label` flag · try a list of known cloud labels
+- Chose hardcoded, to keep scope minimal: this cluster is DOKS. Nodes without the label show as "unpooled" rather than disappearing. A flag is a small change if another provider is ever needed.
+
+## `/api/v1/pools` payload: every pod, minimal fields
+- Considered: per-pod data loaded per node (like the Nodes page) · everything in one response
+- Chose one response: the capacity map draws every node's per-pod segments at once. Each pod carries only 7 small fields and the poll is ETag'd, so it costs a few hundred bytes per pod only when something changes. Tradeoff: payload grows with the pod count. If that becomes a problem, segments under ~1% can be folded into "other".

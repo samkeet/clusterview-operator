@@ -1,0 +1,153 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ClusterView: Option C: Namespace × pool matrix</title><style>:root {
+  --fg: #1f2328;
+  --muted: #656d76;
+  --border: #d0d7de;
+  --bg: #f6f8fa;
+  --card: #ffffff;
+  --accent: #0969da;
+  --ok: #1a7f37;
+  --bad: #cf222e;
+  --unknown: #9a6700;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 24px;
+  padding: 12px 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+h1 { font-size: 18px; margin: 0; }
+h2 { font-size: 16px; margin: 0; }
+
+.summary { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.summary b { font-variant-numeric: tabular-nums; }
+.updated, .muted { color: var(--muted); }
+
+.banner {
+  margin: 12px 20px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--bad);
+  border-radius: 6px;
+  background: #ffebe9;
+}
+
+/* Last good data stays visible but dimmed while the API is unreachable. */
+.stale { opacity: 0.5; }
+
+main { padding: 16px 20px; display: grid; gap: 16px; }
+
+.nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.node {
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.node:hover { border-color: var(--accent); }
+.node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+
+.node-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.node-name { font-weight: 600; margin-right: auto; word-break: break-all; }
+
+.badge {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  color: #fff;
+}
+.badge.Ready { background: var(--ok); }
+.badge.NotReady { background: var(--bad); }
+.badge.Unknown { background: var(--unknown); }
+.badge.cordoned { background: var(--muted); }
+
+.metrics { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+.metrics dt { color: var(--muted); }
+.metrics dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.pods {
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.pods-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.pods .banner { margin: 0 0 8px; border-color: var(--unknown); background: #fff8c5; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.restarts-high { color: var(--bad); font-weight: 600; }
+
+.mock-note{margin:0;padding:8px 20px;background:#fff8c5;border-bottom:1px solid #d4a72c;font-size:13px}
+nav.top{display:flex;gap:4px;margin-left:auto}nav.top a{padding:4px 10px;border-radius:6px;color:var(--fg);text-decoration:none}nav.top a.on{background:var(--bg);font-weight:600}
+.wrap{padding:16px 20px;display:grid;gap:14px}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:8px}
+.meter{margin:6px 0}.meter-l{display:flex;justify-content:space-between;font-size:12px;gap:8px}
+.track{position:relative;height:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;overflow:visible;margin-top:3px}
+.fill{height:100%;background:var(--accent);border-radius:4px}.limit{position:absolute;top:-3px;width:2px;height:14px;background:var(--unknown)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{font-size:12px;border:1px solid var(--border);border-radius:12px;padding:1px 8px;background:var(--card)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+table.pt{width:100%;border-collapse:collapse;font-size:12.5px}table.pt th,table.pt td{padding:5px 8px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+table.pt th{color:var(--muted);font-weight:600}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.q{font-size:11px;padding:0 6px;border-radius:10px;border:1px solid var(--border)}.q-Guaranteed{color:var(--ok);border-color:var(--ok)}.q-BestEffort{color:var(--muted)}.q-Burstable{color:var(--accent);border-color:#54aeff}
+.sample{font-size:11px;color:var(--unknown);margin-left:6px}.nr{color:var(--bad);font-weight:600}
+.stack{display:flex;height:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-top:3px}.stack span{height:100%;border-right:1px solid #fff}
+.legend{font-size:12px;color:var(--muted)}
+table.mx{border-collapse:collapse;width:100%;background:var(--card)}table.mx th,table.mx td{border:1px solid var(--border);padding:8px 10px;text-align:left;font-size:13px}table.mx td.c{cursor:pointer}table.mx td.c:hover{background:#ddf4ff}table.mx td.sel{outline:2px solid var(--accent)}.cn{font-size:18px;font-weight:600}.sm{font-size:12px;color:var(--muted)}</style></head><body>
+<p class="mock-note"><b>Option C: Namespace × pool matrix</b>: Rows are namespaces and columns are pools. Each cell shows the pod count plus CPU/memory requests as a share of that pool's allocatable. Click a cell to list those pods with their node and per-node share. · Real requests/limits from this cluster (as in <code>kubectl describe node</code>; % of allocatable). The second pool and the workload namespaces are <span class="sample">sample</span>. No usage numbers (metrics-server isn't installed). <a href="index.html">← all options</a></p>
+<header><h1>ClusterView</h1><nav class="top"><a href="#">Nodes</a><a class="on" href="#">Node pools</a></nav></header>
+<main class="wrap" id="root"></main><script>
+const POOLS=[{"name": "pool-qhbs5hlue", "type": "s-4vcpu-8gb", "sample": false, "nodes": [{"name": "pool-qhbs5hlue-3efzx4", "ready": true, "alloc": {"cpu": 3890, "mem": 6414}, "pods": [{"ns": "kube-system", "name": "cilium-pg45c", "cr": 310, "cl": 1000, "mr": 332, "ml": 1024, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "coredns-6b4b4b84d8-lkf46", "cr": 100, "cl": 0, "mr": 170, "ml": 170, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "coredns-6b4b4b84d8-wgmlq", "cr": 100, "cl": 0, "mr": 170, "ml": 170, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "csi-do-node-kq6zg", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}, {"ns": "kube-system", "name": "do-node-agent-f8lcw", "cr": 102, "cl": 0, "mr": 80, "ml": 300, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "doks-telemetry-config-reloader-s6p9z", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}, {"ns": "kube-system", "name": "hubble-relay-6fd68c8df5-6qjp7", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}, {"ns": "kube-system", "name": "hubble-ui-7857984d59-7jv45", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}, {"ns": "kube-system", "name": "konnectivity-agent-8d54854f-pvxgc", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}, {"ns": "kube-system", "name": "konnectivity-agent-8d54854f-x52f4", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}]}, {"name": "pool-qhbs5hlue-3efzxi", "ready": true, "alloc": {"cpu": 3890, "mem": 6414}, "pods": [{"ns": "clusterview-operator-system", "name": "clusterview-operator-controller-manager-5c47c65675-hnpn8", "cr": 50, "cl": 500, "mr": 96, "ml": 256, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "cilium-lz7dt", "cr": 310, "cl": 1000, "mr": 332, "ml": 1024, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "csi-do-node-lt8xv", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}, {"ns": "kube-system", "name": "do-node-agent-plwfh", "cr": 102, "cl": 0, "mr": 80, "ml": 300, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "doks-telemetry-config-reloader-fpt29", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}]}, {"name": "pool-qhbs5hlue-3efzxv", "ready": true, "alloc": {"cpu": 3890, "mem": 6414}, "pods": [{"ns": "kube-system", "name": "cilium-pvlh9", "cr": 310, "cl": 1000, "mr": 332, "ml": 1024, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "csi-do-node-5l586", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}, {"ns": "kube-system", "name": "do-node-agent-s44cf", "cr": 102, "cl": 0, "mr": 80, "ml": 300, "qos": "Burstable", "sample": false}, {"ns": "kube-system", "name": "doks-telemetry-config-reloader-scw9h", "cr": 0, "cl": 0, "mr": 0, "ml": 0, "qos": "BestEffort", "sample": false}]}]}, {"name": "pool-batch (sample)", "type": "s-8vcpu-16gb", "sample": true, "nodes": [{"name": "pool-batch-a1x9 (sample)", "ready": true, "alloc": {"cpu": 7900, "mem": 13100}, "pods": [{"ns": "kube-system", "name": "cilium-a1", "cr": 310, "cl": 1000, "mr": 332, "ml": 1024, "qos": "Burstable", "sample": true}, {"ns": "shop", "name": "checkout-7d9f-2kq", "cr": 1000, "cl": 2000, "mr": 1024, "ml": 2048, "qos": "Burstable", "sample": true}, {"ns": "shop", "name": "catalog-5c8b-x8z", "cr": 500, "cl": 1000, "mr": 512, "ml": 1024, "qos": "Burstable", "sample": true}, {"ns": "payments", "name": "ledger-0", "cr": 2000, "cl": 2000, "mr": 4096, "ml": 4096, "qos": "Guaranteed", "sample": true}, {"ns": "payments", "name": "ledger-1", "cr": 2000, "cl": 2000, "mr": 4096, "ml": 4096, "qos": "Guaranteed", "sample": true}]}, {"name": "pool-batch-a1xq (sample)", "ready": false, "alloc": {"cpu": 7900, "mem": 13100}, "pods": [{"ns": "kube-system", "name": "cilium-a2", "cr": 310, "cl": 1000, "mr": 332, "ml": 1024, "qos": "Burstable", "sample": true}, {"ns": "shop", "name": "checkout-7d9f-9mm", "cr": 1000, "cl": 2000, "mr": 1024, "ml": 2048, "qos": "Burstable", "sample": true}, {"ns": "batch", "name": "nightly-report-28h1", "cr": 3000, "cl": 6000, "mr": 6144, "ml": 12288, "qos": "Burstable", "sample": true}]}]}];
+const NS_COLORS={"kube-system":"#8c959f","clusterview-operator-system":"#0969da","shop":"#1a7f37","payments":"#8250df","batch":"#bc4c00"};
+const col=ns=>NS_COLORS[ns]||"#57606a";
+const pct=(v,a)=>a?Math.round(v*100/a):0;
+const cpu=m=>m===0?"0":m%1000===0?(m/1000)+"":m+"m";
+const mem=m=>m===0?"0":m>=1024&&m%1024===0?(m/1024)+"Gi":m+"Mi";
+function el(t,a={},...kids){const e=document.createElement(t);for(const[k,v]of Object.entries(a)){if(k==="class")e.className=v;else if(k==="style")e.style.cssText=v;else if(k.startsWith("on"))e[k]=v;else e.setAttribute(k,v)}for(const c of kids.flat())if(c!=null)e.append(c.nodeType?c:document.createTextNode(String(c)));return e}
+function sum(pods,k){return pods.reduce((s,p)=>s+p[k],0)}
+function nodeTotals(n){return{cr:sum(n.pods,"cr"),cl:sum(n.pods,"cl"),mr:sum(n.pods,"mr"),ml:sum(n.pods,"ml")}}
+function poolTotals(pl){const a={cpu:0,mem:0},t={cr:0,cl:0,mr:0,ml:0,pods:0};for(const n of pl.nodes){a.cpu+=n.alloc.cpu;a.mem+=n.alloc.mem;const x=nodeTotals(n);for(const k in x)t[k]+=x[k];t.pods+=n.pods.length}return{a,t}}
+function nsCounts(pods){const m={};for(const p of pods)m[p.ns]=(m[p.ns]||0)+1;return Object.entries(m).sort((a,b)=>b[1]-a[1])}
+// Bar: requests solid, limits as outline marker; >100% limits flagged overcommitted.
+function bar(label,req,lim,alloc,fmt){const r=pct(req,alloc),l=pct(lim,alloc);
+ return el("div",{class:"meter"},el("div",{class:"meter-l"},el("span",{},label),el("span",{class:"muted"},`req ${fmt(req)} (${r}%) · lim ${fmt(lim)} (${l}%)${l>100?" ⚠ overcommitted":""}`)),
+  el("div",{class:"track"},el("div",{class:"fill",style:`width:${Math.min(r,100)}%`}),el("div",{class:"limit",style:`left:${Math.min(l,100)}%`,title:`limits ${l}%`})))}
+function nsChips(pods){return el("div",{class:"chips"},nsCounts(pods).map(([ns,c])=>el("span",{class:"chip"},el("i",{class:"dot",style:`background:${col(ns)}`}),`${ns} `,el("b",{},c))))}
+function podTable(n){const rows=[...n.pods].sort((a,b)=>b.cr-a.cr||b.mr-a.mr);
+ return el("table",{class:"pt"},el("thead",{},el("tr",{},["Namespace","Pod","QoS","CPU req","CPU lim","Mem req","Mem lim"].map(h=>el("th",{},h)))),
+  el("tbody",{},rows.map(p=>el("tr",{},el("td",{},el("i",{class:"dot",style:`background:${col(p.ns)}`}),p.ns),el("td",{class:"mono"},p.name,p.sample?el("span",{class:"sample"},"sample"):null),el("td",{},el("span",{class:"q q-"+p.qos},p.qos)),
+   el("td",{},`${cpu(p.cr)} (${pct(p.cr,n.alloc.cpu)}%)`),el("td",{},`${cpu(p.cl)} (${pct(p.cl,n.alloc.cpu)}%)`),el("td",{},`${mem(p.mr)} (${pct(p.mr,n.alloc.mem)}%)`),el("td",{},`${mem(p.ml)} (${pct(p.ml,n.alloc.mem)}%)`)))))}
+// Stacked share bar: each pod's request as a segment, coloured by namespace.
+function stack(n,k,allocK){return el("div",{class:"stack",title:k==="cr"?"CPU requests by pod":"Memory requests by pod"},n.pods.filter(p=>p[k]>0).map(p=>el("span",{style:`width:${p[k]*100/n.alloc[allocK]}%;background:${col(p.ns)}`,title:`${p.ns}/${p.name}: ${k==="cr"?cpu(p[k]):mem(p[k])} (${pct(p[k],n.alloc[allocK])}%)`})))}
+
+const root=document.getElementById('root');const nss=[...new Set(POOLS.flatMap(p=>p.nodes.flatMap(n=>n.pods.map(x=>x.ns))))];
+const head=el("tr",{},el("th",{},"Namespace"),POOLS.map(pl=>{const {a,t}=poolTotals(pl);return el("th",{},pl.name,el("div",{class:"sm"},`${pl.nodes.length} nodes · ${cpu(a.cpu)} CPU · ${mem(a.mem)}`))}));
+const det=el("section",{class:"panel",style:"padding:12px 16px"},el("p",{class:"muted"},"Click a cell"));
+const tb=el("tbody");for(const ns of nss){const tr=el("tr",{},el("td",{},el("i",{class:"dot",style:`background:${col(ns)}`}),ns));
+ for(const pl of POOLS){const {a}=poolTotals(pl);const rows=pl.nodes.flatMap(n=>n.pods.filter(p=>p.ns===ns).map(p=>({...p,node:n})));
+  const td=el("td",{class:"c"},rows.length?[el("div",{class:"cn"},rows.length,el("span",{class:"sm"}," pods")),el("div",{class:"sm"},`CPU req ${pct(sum(rows,"cr"),a.cpu)}% · Mem req ${pct(sum(rows,"mr"),a.mem)}% of pool`)]:el("span",{class:"sm"},"—"));
+  td.onclick=()=>{document.querySelectorAll('td.sel').forEach(x=>x.classList.remove('sel'));td.classList.add('sel');det.replaceChildren(el("h2",{},`${ns} in ${pl.name}`),el("table",{class:"pt"},el("thead",{},el("tr",{},["Pod","Node","QoS","CPU req (of node)","Mem req (of node)","CPU lim","Mem lim"].map(h=>el("th",{},h)))),el("tbody",{},rows.map(p=>el("tr",{},el("td",{class:"mono"},p.name),el("td",{class:"mono"},p.node.name),el("td",{},el("span",{class:"q q-"+p.qos},p.qos)),el("td",{},`${cpu(p.cr)} (${pct(p.cr,p.node.alloc.cpu)}%)`),el("td",{},`${mem(p.mr)} (${pct(p.mr,p.node.alloc.mem)}%)`),el("td",{},cpu(p.cl)),el("td",{},mem(p.ml)))))))};tr.append(td)}tb.append(tr)}
+root.append(el("section",{class:"panel",style:"overflow:auto"},el("table",{class:"mx"},el("thead",{},head),tb)),det);tb.querySelector('td.c').click();</script></body></html>
