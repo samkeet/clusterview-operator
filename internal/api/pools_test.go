@@ -20,13 +20,19 @@ import (
 	"github.com/samkeet/clusterview-operator/internal/clusterstate"
 )
 
-const pathPools = "/api/v1/pools"
+const (
+	pathPools    = "/api/v1/pools"
+	poolA        = "pool-a"
+	poolNodeType = "s-4vcpu-8gb"
+	genericError = "internal error"
+)
 
-func poolNode(name, pool string) *corev1.Node {
+// poolNode is a node in pool-a, sized like the DOKS nodes.
+func poolNode(name string) *corev1.Node {
 	n := readyNode(name)
 	n.Labels = map[string]string{
-		clusterstate.NodePoolLabel:     pool,
-		corev1.LabelInstanceTypeStable: "s-4vcpu-8gb",
+		clusterstate.NodePoolLabel:     poolA,
+		corev1.LabelInstanceTypeStable: poolNodeType,
 	}
 	n.Status.Allocatable = corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse("3890m"),
@@ -53,7 +59,7 @@ func poolObjects() []client.Object {
 	n3 := readyNode("n3")
 	n3.Spec.Unschedulable = true
 	return []client.Object{
-		poolNode("n1", "pool-a"), poolNode("n2", "pool-a"), n3,
+		poolNode("n1"), poolNode("n2"), n3,
 		requesting(testPod("a", "web-0", "n1", corev1.PodRunning, 0), "100m", "128Mi"),
 		requesting(testPod("b", "db-0", "n1", corev1.PodRunning, 0), "500m", "1Gi"),
 		requesting(testPod("b", "job", "n2", corev1.PodSucceeded, 0), "1", "1Gi"),
@@ -75,11 +81,11 @@ func TestPools(t *testing.T) {
 	}
 
 	got := decode[clusterstate.PoolsSnapshot](t, rec)
-	if len(got.Pools) != 2 || got.Pools[0].Name != "pool-a" || got.Pools[1].Name != clusterstate.UnpooledPool {
+	if len(got.Pools) != 2 || got.Pools[0].Name != poolA || got.Pools[1].Name != clusterstate.UnpooledPool {
 		t.Fatalf("pools = %+v, want pool-a then %s", got.Pools, clusterstate.UnpooledPool)
 	}
 	a := got.Pools[0]
-	if a.NodeCount != 2 || a.InstanceType != "s-4vcpu-8gb" {
+	if a.NodeCount != 2 || a.InstanceType != poolNodeType {
 		t.Errorf("pool-a = %d nodes, type %q", a.NodeCount, a.InstanceType)
 	}
 	n1 := a.Nodes[0]
@@ -188,7 +194,7 @@ func TestPoolsClusterViewErrorFailsClosed(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
-	if e := decode[errorResponse](t, rec); e.Error != "internal error" {
+	if e := decode[errorResponse](t, rec); e.Error != genericError {
 		t.Errorf("error = %q, want the generic message", e.Error)
 	}
 }
@@ -228,13 +234,13 @@ func richPod() *corev1.Pod {
 				bulk(corev1.Container{Name: "init", Resources: res("1", "1Gi")}),
 				bulk(corev1.Container{Name: "proxy", RestartPolicy: &always, Resources: res("50m", "64Mi")}),
 			},
-			Containers: []corev1.Container{bulk(corev1.Container{Name: "app", Resources: res("300m", "256Mi")})},
+			Containers: []corev1.Container{bulk(corev1.Container{Name: "main", Resources: res("300m", "256Mi")})},
 		},
 		Status: corev1.PodStatus{
 			Phase:    corev1.PodRunning,
 			QOSClass: corev1.PodQOSBurstable,
 			ContainerStatuses: []corev1.ContainerStatus{{
-				Name:               "app",
+				Name:               "main",
 				AllocatedResources: corev1.ResourceList{corev1.ResourceCPU: q("400m"), corev1.ResourceMemory: q("256Mi")},
 				Resources:          &corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceCPU: q("600m")}},
 			}},
@@ -245,9 +251,9 @@ func richPod() *corev1.Pod {
 // TestTransformsKeepPoolInputs guards the capacity map against the cache
 // transforms: stripping a pod or node must never change what BuildPools sees.
 func TestTransformsKeepPoolInputs(t *testing.T) {
-	want := clusterstate.BuildPools([]corev1.Node{*poolNode("n1", "pool-a")}, []corev1.Pod{*richPod()}, nil)
+	want := clusterstate.BuildPools([]corev1.Node{*poolNode("n1")}, []corev1.Pod{*richPod()}, nil)
 
-	n, _ := StripNode(poolNode("n1", "pool-a"))
+	n, _ := StripNode(poolNode("n1"))
 	p, _ := StripPod(richPod())
 	got := clusterstate.BuildPools([]corev1.Node{*n.(*corev1.Node)}, []corev1.Pod{*p.(*corev1.Pod)}, nil)
 

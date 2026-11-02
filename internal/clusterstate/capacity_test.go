@@ -258,12 +258,13 @@ func boundPod(ns, name, nodeName string, phase corev1.PodPhase, req, lim corev1.
 // 1 (25%), memory 752Mi (11%) / 1664Mi (25%).
 func TestBuildPoolsMatchesDescribe(t *testing.T) {
 	n := poolNode("pool-qhbs5hlue-3efzx4", "pool-qhbs5hlue", "s-4vcpu-8gb")
-	pods := []corev1.Pod{
+	pods := make([]corev1.Pod, 0, 10)
+	pods = append(pods,
 		ciliumPod(),
 		boundPod(nsSystem, "coredns-6b4b4b84d8-lkf46", "", corev1.PodRunning, rl("100m", "170Mi"), rl("", "170Mi")),
 		boundPod(nsSystem, "coredns-6b4b4b84d8-wgmlq", "", corev1.PodRunning, rl("100m", "170Mi"), rl("", "170Mi")),
 		boundPod(nsSystem, "do-node-agent-f8lcw", "", corev1.PodRunning, rl("102m", "80Mi"), rl("", "300Mi")),
-	}
+	)
 	for _, name := range []string{"csi-do-node-kq6zg", "doks-telemetry-config-reloader-s6p9z", "hubble-relay-6fd68c8df5-6qjp7",
 		"hubble-ui-7857984d59-7jv45", "konnectivity-agent-8d54854f-pvxgc", "konnectivity-agent-8d54854f-x52f4"} {
 		pods = append(pods, boundPod(nsSystem, name, "", corev1.PodRunning, nil, nil))
@@ -362,7 +363,7 @@ func TestBuildPoolsGrouping(t *testing.T) {
 	}
 
 	a1 := snap.Pools[0].Nodes[0]
-	var podNames []string
+	podNames := make([]string, 0, len(a1.Pods))
 	for _, p := range a1.Pods {
 		podNames = append(podNames, p.Namespace+"/"+p.Name)
 	}
