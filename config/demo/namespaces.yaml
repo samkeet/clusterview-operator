@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-shop
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-payments
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-batch

@@ -1,0 +1,12 @@
+# Demo workload: 20 long-running pods in 3 namespaces, kept on the cluster so the
+# Nodes page, the pod events drawer and the node pool capacity map have realistic
+# data. Applied separately from config/default (no namePrefix): `make demo`.
+resources:
+- namespaces.yaml
+- shop.yaml
+- payments.yaml
+- batch.yaml
+labels:
+- pairs:
+    app.kubernetes.io/part-of: clusterview-demo
+  includeSelectors: false
