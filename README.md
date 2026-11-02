@@ -11,9 +11,11 @@ cluster state.
 - **Pod drawer:** click a pod for its header (namespace, phase, restarts, node) and
   Events / Logs / Details tabs. Events shows the 5 latest, newest first, with page
   numbers and Warnings highlighted. Logs is a placeholder for now.
-- **Node pools page** (`#/pools`, in progress): a capacity map per node pool
-  showing each pod's CPU and memory requests as a share of the node's allocatable,
-  coloured by namespace, like `kubectl describe node`.
+- **Node pools page** (`#/pools`): a capacity map per node pool. Each pod's CPU
+  and memory requests are drawn as a share of the node's allocatable, coloured
+  by namespace, with a legend filter and a `kubectl describe node`-style table
+  per node. The numbers match describe exactly, including init containers and
+  sidecars.
 
 The UI is reached with `kubectl port-forward` only. Nothing is exposed to the
 internet.
@@ -22,21 +24,39 @@ internet.
 
 ```sh
 cp .env.example .env     # first time: fill in KUBECONFIG and credentials
-make up                  # image, operator, sample ClusterView, 20 demo pods, then opens the UI
+make ui                  # operator already running on the cluster: just open the UI
+make up                  # fresh cluster: deploy operator, sample ClusterView, 20 demo pods, then open the UI
 ```
 
-`make up` loads `.env` itself and is safe to re-run. Use
-`make up SKIP_BUILD=1 IMG=<image>` to deploy an image that's already pushed, and
-`make ui` to reopen the UI later. [INSTRUCTIONS.md](INSTRUCTIONS.md) has the full
-walkthrough, prerequisites, what you should see, and troubleshooting.
+`make up` **never builds**. It deploys the pinned image in `hack/IMAGE`, which is
+already in GHCR, so you don't need podman or registry push access.
+
+`make up` and `make ui` load `.env` themselves (a `KUBECONFIG` you've already
+exported takes precedence), so there's no separate `source .env` step. `make up`
+is safe to re-run. It ends by running `make ui`, so it **keeps running until
+Ctrl-C**. Use `NO_UI=1` to deploy and return. Run `make ui` to reopen the UI
+later. [INSTRUCTIONS.md](INSTRUCTIONS.md) has the full walkthrough,
+prerequisites, what you should see, and troubleshooting.
 
 | Command | What it does |
 |---|---|
-| `make up` | Build and push the image (linux/amd64), ensure the pull secret, deploy, apply the sample `ClusterView` and the demo workload, then run `make ui` |
-| `make ui` | Port-forward the UI (8080, or a random free port if that's taken), open the browser, reconnect if the forward drops |
+| `make up` | Ensure the pull secret, deploy the pinned image from `hack/IMAGE` (no build), apply the sample `ClusterView` and the demo workload, then run `make ui`. A no-op on a cluster that's already up |
+| `make ui` | Check you can port-forward and the operator is ready, port-forward the UI (8080, or a random free port if that's taken), open the browser, and reconnect if the forward drops (e.g. after a redeploy). Ctrl-C stops it |
 | `make demo` / `make demo-down` | Apply or delete only the 20-pod demo workload (`config/demo/`) |
-| `make down` | Remove the demo, the sample and the operator. This also deletes the `ghcr-pull` secret |
+| `make down` | Remove the demo, the sample and the operator. This also deletes the `ghcr-pull` secret; set `GHCR_PULL_TOKEN` in `.env` so the next `make up` can recreate it |
+| `make release` | Maintainers: build and push the image for HEAD, then pin it in `hack/IMAGE` (see [Releasing](#releasing)) |
 | `make test` / `make lint` | Unit + envtest suites / golangci-lint |
+
+Options:
+
+| Option | Applies to | Effect |
+|---|---|---|
+| `IMG=<image>` | `make up` | Deploy another image that's already in GHCR instead of the pinned one |
+| `NO_UI=1` | `make up` | Deploy only. Don't start the port-forward or open the browser |
+| `PORT=<port>` | `make ui` | Prefer another local port (default 8080). It still falls back to a random free port if that one's taken |
+| `NO_BROWSER=1` | `make ui` | Print the URL instead of opening a browser |
+
+`make help` lists every target.
 
 ## The `ClusterView` resource
 
@@ -73,6 +93,7 @@ Read-only: `GET` only, and every other method gets `405`. Responses carry an
 | `GET /api/v1/nodes` | `{summary, nodes}`: per node, status, conditions, capacity vs allocatable, pod count |
 | `GET /api/v1/nodes/{name}/pods` | Pods on a node: namespace, name, phase, restarts |
 | `GET /api/v1/namespaces/{ns}/pods/{name}/events?limit=5&offset=0` | `{total, limit, offset, events}`, newest first |
+| `GET /api/v1/pools` | `{filtered, pools}`: per pool (`doks.digitalocean.com/node-pool`, else `(unpooled)`), nodes with allocatable, request/limit totals, and every non-terminated pod's requests, limits and QoS |
 | `GET /healthz` | Liveness |
 
 The `ClusterView`'s namespace filter applies to every pod-level response.
@@ -132,6 +153,17 @@ make manifests   # regenerate CRD and RBAC from kubebuilder markers
 ```
 
 Images are built with podman for `linux/amd64` and tagged with the git short SHA.
-Base images are pinned by multi-platform digest. Changes go through pull
+Base images are pinned by multi-platform digest.
+
+### Releasing
+
+`make up` deploys whatever `hack/IMAGE` names, so publishing a new image is a
+deliberate step:
+
+```sh
+make release     # needs a clean tree, podman and GHCR push: builds + pushes HEAD, writes hack/IMAGE
+make up          # deploy it, then check it on the cluster
+git add hack/IMAGE && git commit -m "build: pin image <sha>"   # in the release PR
+``` Changes go through pull
 requests, and are deployed to the cluster and checked before merging. See
 [CLAUDE.md](CLAUDE.md) for the commit and quality rules.
